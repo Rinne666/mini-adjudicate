@@ -1,10 +1,10 @@
 # Submission Summary — {target}
 
-> The 可申报总结: what is submittable, where, and why each one is safe
-> to submit. Produced at the Deliver stage for every claim whose action
+> The 可申报总结: which drafts are reportable, their proposed routes,
+> and what evidence or policy uncertainty remains. Produced at the Deliver stage for every claim whose action
 > is `report` or `rewrite_then_report`. Claims whose validity is not
-> `holds` never appear here — a claim that does not hold is not
-> "unsubmittable", it is not a vulnerability.
+> `holds`, or whose acceptance is `pending`, do not appear in the
+> reportable table. Blocked claims belong in Blocking facts below.
 
 **Target**: `{name}` · kind `{open_source / closed_product /
 web_service}` · policy `{stated / derived / none}` ·
@@ -13,9 +13,10 @@ adjudicated at `{commit / tag}`.
 ## Submittable
 
 One row per reportable claim, **sorted by severity, descending**
-(`critical` → `high` → `medium` → `low`; ties: core business first,
-then cleanest premise). The Order column keeps the delivery position —
-the table ranks by harm, the sends still go by reception likelihood.
+(`critical` → `high` → `medium` → `low`; retain recorded order for
+ties). The Order column keeps the proposed sending position. Actual
+priority follows target instructions, urgency, and submitter decisions.
+Prepare all drafts together; sending order does not block drafting.
 Every cell cites or points at the adjudication.
 
 | Order | Claim | Severity | Subject (invariant) | Core business | Developer aware | Special config | Boundary crossed | Primary target | Secondary / unsuitable |
@@ -24,8 +25,9 @@ Every cell cites or points at the adjudication.
 
 ## Hardening offers
 
-Claims that hold but whose acceptability is `decline`: patches to
-offer the maintainer, not reports.
+Claims that hold but whose acceptability is `decline`: possible
+improvements. Explain whether the limitation comes from the heuristic,
+a verified policy rule, or both; do not imply a maintainer already rejected it.
 
 | Claim | Why it will not be accepted as a report | The offer |
 |---|---|---|
@@ -37,6 +39,8 @@ submitter can act on it:
 
 - `needs_more_evidence` claims: the exact missing fact and the safe
   way to observe it.
+- `holds` claims with `acceptability: pending`: the recorded
+  `acceptance.blocking_facts`, observation steps, and incomplete checks.
 - Any `developer_awareness: aware` finding and the re-framing it
   forces.
 - Any timeline field that is `untraced`, and what a trace would change
@@ -44,7 +48,7 @@ submitter can act on it:
 
 ## Timeline (per submittable claim)
 
-From `oss_verification.commit_timeline` — cited facts or explicit
+From `acceptance.oss_verification.commit_timeline` — cited facts or explicit
 `untraced — reason`.
 
 | Claim | Introduced | First release with it | Fix state | Published as |
@@ -57,7 +61,9 @@ can decide them:
 
 - Channel confirmation (one channel; the alternatives considered).
 - Credit / anonymity decision.
-- AI-assistance disclosure state (several platforms now require it).
+- AI-assistance disclosure state under the specific verified program rule.
+- Rule provenance: `source_url`, `checked_at`, and `program_scope`; name
+  provisional target-fit conclusions where rules could not be checked.
 - CNVD / CNNVD double-filing intent, if any — two submissions by
   design, never by accident.
 - **Confirmation that nothing has been submitted by this Skill.**

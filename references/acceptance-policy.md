@@ -1,153 +1,84 @@
-# Acceptance Policy — reading what the maintainer will accept
+# Acceptance Policy
 
-> Load this when reading the upstream's policy, published advisories, or
-> prior classifications, and when deciding what the project's trust model
-> and boundaries are.
+Read this when judging the policy fit of a technically holding claim.
+The target's current instructions decide its scope and channel. The
+skill's acceptance matrix is a heuristic; a matching label is not proof
+of what the target will accept.
 
-This applies **only to a claim whose validity is `holds`**. A claim that
-does not hold is not "unacceptable" — it is not a vulnerability, and it
-never reaches this stage.
+## Establish authority and provenance
 
-The acceptability verdict is judged against **the maintainer's acceptance
-policy**, not against the quality of the evidence. A perfect proof of a
-defect the maintainer considers out of scope is a closed report.
+Look for the current security policy, program brief, or reporting page.
+Record the exact source, applicable product/version/program, and the date
+you actually checked it. Use the handwritten Policy Sources section of
+the notes for `source_url`, `checked_at`, and `program_scope`, plus captured
+evidence references. A locally versioned policy can also carry its path
+and commit; do not invent a web URL for it.
 
----
+Mark `policy_source` as:
 
-## 1. Find the policy
+- `stated`: an applicable policy was found and read.
+- `derived`: the interpretation comes from documentation/history rather
+  than an explicit applicable policy; name the assumptions.
+- `none`: no usable source was located; record where you looked.
 
-In order of authority:
+A known policy conflict or missing applicability fact must be visible in
+the assessment. Never turn absence of a policy into a made-up authority.
 
-1. **`SECURITY.md`** in the target repository — the explicit scope.
-2. **Published advisories** — the empirical record of what was accepted.
-3. **Release notes** — the classification of each fix.
-4. **Documentation** — the stated trust model.
-5. **A previous refusal of yours** — the model in the maintainer's own
-   words, which outranks all of the above.
+## Read the policy against this claim
 
-If none exists, the trust ladder is **derived**. Mark it derived in the
-notes and state the assumed model in the report, so the maintainer can
-correct it instead of dismissing the whole thing. A report that cites
-an authority nobody published is worse than one that says "assuming X,
-this is a violation because Y".
+Extract only what affects the decision:
 
----
+- The trust model: actors, granted capabilities, and protected resources.
+- Covered products, versions, deployments, assets, and issue classes.
+- Explicit exclusions and any exceptions for supported configurations.
+- Required evidence, reproduction conditions, and report format.
+- Preferred channel, handling of duplicates, and disclosure conditions.
 
-## 2. Read the scope, not just the exclusions
+Distinguish **shipped default**, **officially supported configuration**,
+and **unsupported or weakened configuration**. They are not synonyms. A
+supported database or optional feature may be non-default and still in
+scope. Follow the target's wording instead of assuming all non-default
+states are excluded or relabeling them as literal defaults.
 
-A scope document usually has the same shape. These parts decide the
-outcome:
+Record what the policy says about this claim's exact boundary. A product
+statement that an action is deliberately allowed is relevant; a generic
+claim such as "security matters" does not define a specific invariant.
 
-- **The trust model.** The roles and what each may reach. A finding that
-  stays inside one role's reach is out of scope, however damaging it is
-  to that role's own data.
-- **The in-scope categories.** Usually the vulnerability classes the
-  project will number.
-- **The exclusions.** Read for the *default state* rule specifically:
-  most projects exclude issues that require the researcher to put the
-  target into a non-default state. Note the exceptions — shipped
-  defaults, and **all officially supported deployment forms** — because
-  a supported configuration is "default" for acceptance purposes.
-- **The gray-zone rules.** These decide the hard cases, and they are
-  usually where a report is won or lost.
-- **The channel.** Which one, and whether anonymity changes the
-  channel. Never use two.
+## Use history as evidence, not a universal rule
 
-### The default-state rule, precisely
+Prior advisories, release notes, issues, and refusals provide comparisons.
+For each relevant case, record its revision/date, premise, boundary,
+consequence, and classification. Explain which parts match this claim and
+which differ.
 
-A **default** state (in scope) includes:
-
-- shipped defaults, default parameters, default credentials;
-- **all officially supported databases, storage backends, protocol
-  versions, and deployment shapes** the vendor documents;
-- a fresh install with no changes;
-- every role the product is designed to have.
-
-A **non-default** state (possibly excluded) includes:
-
-- debug, eval, or experimental switches the researcher had to enable;
-- security-relevant settings rewritten to a weak value;
-- unsupported or third-party components the researcher introduced;
-- abnormal input combinations the product's normal flow never produces.
-
-The distinction that matters most: **is the deployment the one the
-vendor recommends?** A documented PostgreSQL deployment is a default
-deployment. A hand-modified configuration file is not.
-
----
-
-## 3. Read the advisory history as evidence
-
-The project's published advisories are the strongest available signal,
-because they show where the project's own boundary lies.
-
-### The classification signal
-
-| How it was released | What it means for a similar report |
+| Historical classification | What it supports |
 |---|---|
-| **Security fix** | The project treats that shape as a vulnerability. A near-identical shape will be accepted. |
-| **Bug fix** | The project treats that shape as a functional defect, not a boundary violation. Reporting the same shape gets the same answer. |
-| **Hardening** | The project acknowledges the weakness and declines to call it a vulnerability. The answer is already written. |
+| Security fix | The project treated that particular case as security-relevant. Compare the boundary and premise before extrapolating. |
+| Bug fix | The prior case was published as functional maintenance; inspect whether the security consequence was the same or considered. |
+| Hardening | The prior decision may indicate an intended trust boundary or insufficient demonstrated harm. Check the stated reason. |
+| Wontfix/refusal | A decision in a particular context; it may clarify scope, but does not overrule a newer explicit policy automatically. |
 
-So before writing a report, search the advisory history for the
-**shape** you are about to report: same component, same kind of
-precondition, same consequence family. Find how it was classified
-there. If it was hardening, you are writing a report whose answer
-already exists — change the subject, or do not report it.
+A maintainer's old refusal does not always outweigh a current policy.
+Public advisories do not reveal every private email intake. Do not infer
+that a channel was never used or a future report must be accepted merely
+from the visible history. Preserve disagreement and uncertainty rather
+than turning an anecdote into an absolute rule.
 
-### What to extract from each advisory
+## Choose the channel
 
-- The severity the project used, and against which vector.
-- Whether the affected range was a single release or a range.
-- Whether the project credited the reporter, and how.
-- The **shape**: the premise, the boundary crossed, the consequence.
-- Whether the fix was complete or partial. A partial fix is a
-  legitimate subject — but the subject is the *residual*, and you must
-  show the residual is still reachable, not merely that the old text
-  is gone.
+Prefer the current explicit instruction. When it is silent, use available
+reporting facilities and evidence of actual practice, marking the choice
+as an inference. Record one primary channel with a reason and any planned
+secondary registry steps. See [ordering and channels](ordering-and-channels.md).
 
----
+Check relevant format, identity, encryption, attachment, and timing
+requirements before drafting. Prepare the complete batch without sending
+it or waiting for an external reply.
 
-## 4. The channel
+## Final policy check
 
-Most projects name two alternatives. Pick **one**, and write down why.
-
-- If a private advisory flow exists (GitHub Security Advisories, a
-  private intake form), it is usually the better channel: it is
-  structured, it produces a stable record, and it is the channel the
-  project already uses for its published advisories. Evidence: if every
-  published advisory came through that flow, that is the flow.
-- Email is usually the alternative for anonymity, or for a project
-  that does not use an advisory platform.
-
-**Never use both.** Two submissions become two intakes of the same
-issue, which reads as either spam or a misunderstanding, and it splits
-the record so neither copy gets a clean review.
-
-Check the channel before writing:
-
-- Does it require a specific subject line, format, or PGP key?
-- Does it forbid attachments?
-- Does it ask for a disclosure timeline?
-- Does it ask whether the issue is already public?
-
----
-
-## 5. A worked reading
-
-A real project (SFTPGo) ships `SECURITY.md` that offers two channels
-without expressing a preference. The published record settles it: every
-advisory in the project's history is a GitHub Security Advisory
-published by the maintainer's own account, and the advisory page
-carries a "Report a vulnerability" button pointing at the private
-reporting flow. Email has never been used.
-
-Conclusion: the private advisory flow is the channel, because it is the
-one the project demonstrably uses. The only reason to choose email
-would be a need for anonymity — and then switch channels entirely rather
-than sending to both.
-
-Two further facts from the same reading changed what to expect from the
-outcome: the project publishes no CVE IDs, so do not expect one; and it
-releases advisories in batches, so submitting several reports over time
-fits its rhythm rather than looking like volume.
+A reviewer should be able to trace the stated policy fit to a source,
+understand the configuration assumptions, and distinguish a target's
+explicit rule from the skill's heuristic. If they cannot, revise the
+assessment. The validator checks the recorded structure, not whether a
+quoted policy really applies or whether a maintainer will agree.

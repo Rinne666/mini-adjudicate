@@ -19,6 +19,8 @@ credential presented by an unauthenticated client.
   `app.php:108`.
 - The entry point is `AuthService::login()` at `app.php:99`, reached with
   a username and a password and nothing else.
+- `default_auth.php:13-33` supplies the default adapter and wires it into
+  this service; E000012 captures this source and its SHA-256.
 
 ## Attacker identity
 
@@ -33,16 +35,17 @@ credential was rewritten`, which may be an administrator.
 
 - Attacker state: network access to the login endpoint, and the target
   username.
-- System state: an external authentication extension configured for this
-  deployment.
-- The exact condition that unlocks the chain: the extension answers with
-  an empty body.
-- **The residual premise, stated honestly.** An empty answer is a
-  documented shape of the extension's response, and the extension says so
-  itself (`app.php:76-80`). It is not an operator misconfiguration and
-  not a disabled feature. Whether the configured extension ever answers
-  that way in this deployment is not observable from source, and the
-  report says so.
+- System state: the fixture's default service composition in
+  `default_auth.php:27-33`, with an existing account and no rate-limit
+  environment override. The default limiter permits the request.
+- The exact trigger is established by the implementation, not only the
+  interface contract: `DefaultFixtureExternalAuth::authenticate()`
+  unconditionally returns `''` at `default_auth.php:17`, and the default
+  factory passes that adapter into `AuthService` at line 31.
+- An ordinary unauthenticated login request therefore produces the empty
+  response without a provider outage or operator change. A deployment
+  using another, uninspected provider requires a separate assessment;
+  unknown trigger control must remain `unknown` / `pending`.
 
 ## Same-version behaviour divergence
 
@@ -57,9 +60,11 @@ presented over the stored credential under that same condition
 ## Attack path
 
 1. The client calls `AuthService::login($username, $password)` at
-   `app.php:99`. Nothing precedes it; the method takes two strings.
+   `app.php:99`. No authentication gate precedes it; the method takes two
+   strings and consults the limiter, whose default permits the request.
 2. The extension is asked to authenticate (`app.php:106`) and answers
-   with an empty body.
+   with an empty body because the default factory installs the adapter
+   whose return value is unconditional (`default_auth.php:17,31`).
 3. The empty answer is matched at `app.php:108`. The branch reads it as
    "please set this password".
 4. `Store::save()` is called with `password_hash($password, ...)` and
@@ -97,24 +102,32 @@ none — the branch writes and returns unconditionally. The two sibling
 paths that *do* refuse the same answer (`app.php:134`, `app.php:156`)
 are what make this a divergence rather than a design choice.
 
+The premise is independently supported by E000012: the source contains
+both the unconditional empty return and the default constructor wiring.
+E000008 and E000009 searched only `app.php`; they do not claim that the
+repository lacks an extension implementation. E000013 captures SECURITY.md
+for the scope, channel, and historical-classification assessment.
+
 ## Severity
 
-`high` — an unauthenticated client takes over any account whose
+`critical` — an unauthenticated client takes over any account whose
 username it knows, and the account's own permissions, including
 administrator, come with it.
 
-**CVSS v3.1**: `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N` → **8.1
-(high)**.
+**CVSS v3.1**: `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N` → **9.1
+(critical)**. The vector was cross-checked with `runtime/cvss31.py`.
 
 `PR:N` because no credentials are needed to reach the login path;
-`AC:L` because no condition beyond the extension's documented empty
-answer is required; `S:U` because the scope is the same authority
+`AC:L` because the default adapter returns empty deterministically for an
+ordinary request; `S:U` because the scope is the same authority
 realm; `C:H`/`I:H` because the client gains the account's readable and
 writable data; `A:N` because nothing is made unavailable.
 
 ## Version and scope
 
-- **Version tested**: the fixture at its current revision.
+- **Source reviewed**: `app.php` plus `default_auth.php` at the current
+  fixture revision. This is a source-only teaching example; no PHP was
+  executed and no live endpoint was tested.
 - **Affected range**: every build that contains `AuthService::login()`
   with this branch.
 - **Patched version**: none released.
@@ -135,12 +148,11 @@ same way the probe and the admin plane do. The smallest change is to
 return `false` on the empty branch instead of writing the presented
 password's hash over the stored credential.
 
-A remediation that derives the new credential from the request — for
-example, writing a hash only when the extension returned a non-empty
-payload, or accepting the empty answer as "keep the stored credential" —
-closes the gap. A change that merely skips the `password_verify()` call
-after the write does not: the stored credential would still have been
-replaced by attacker-controlled material.
+Do not derive or replace a stored credential from an unauthenticated
+login request. An alternative local-password fallback must verify the
+presented password against the existing hash without modifying it. A
+change that merely removes a comparison after the write does not repair
+the credential overwrite.
 
 ## Notes for the submitter
 

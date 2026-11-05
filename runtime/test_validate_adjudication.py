@@ -7,8 +7,8 @@ The two derivations are the core of the framework:
                 any fixed    -> already_fixed
                 an unresolved defect/reachability/consequence
                             -> needs_more_evidence
-                an unresolved precondition alone -> holds
-                all confirmed                       -> holds
+                missing defect/reachability/consequence -> needs_more_evidence
+                all three confirmed, unresolved precondition -> holds
 
   acceptability declared_and_consistent -> decline
                 attacker_only + present      -> accept
@@ -55,9 +55,13 @@ def v(types: list[str], verdicts: list[str]) -> str:
 
 check(
     "all confirmed",
-    v(["defect", "reachability"], ["confirmed", "confirmed"]),
+    v(["defect", "reachability", "consequence"], ["confirmed", "confirmed", "confirmed"]),
     "holds",
 )
+for missing in ("defect", "reachability", "consequence"):
+    types = [value for value in ("defect", "reachability", "consequence") if value != missing]
+    check(f"missing {missing} blocks holds", v(types, ["confirmed"] * len(types)), "needs_more_evidence")
+check("only unresolved precondition cannot hold", v(["precondition"], ["unresolved"]), "needs_more_evidence")
 check(
     "one refuted",
     v(["defect", "reachability"], ["confirmed", "refuted"]),
@@ -107,6 +111,8 @@ check(
 check("no assertions", v([], []), "unadjudicated")
 
 # --- acceptability derivation --------------------------------------------
+
+check("unknown premise stays pending", _derive_acceptability("unknown", None, None), "pending")
 
 check(
     "attacker_only + present + not_declared",

@@ -1,4 +1,4 @@
-# runtime -- enforcement primitives for the mini-audit-skill
+# runtime -- enforcement primitives for mini-adjudication
 #
 # This is NOT the v2.x Runtime. The v2.x Runtime owned:
 #   - L1-L7 phase catalog

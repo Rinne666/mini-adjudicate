@@ -35,11 +35,14 @@ Exit codes: 0 all pass, 1 a test failed.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -48,6 +51,7 @@ from validate_adjudication import (  # noqa: E402
     _load_evidence_ledger,
     validate,
 )
+import validate_adjudication as va
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = REPO_ROOT / "fixtures" / "mini-adjudication"
@@ -298,6 +302,110 @@ with tempfile.TemporaryDirectory() as raw_tmp:
         "a submission without a severity rating is rejected",
         rebuild(base_text, obj), ledger_path, "submission.severity",
     )
+
+    # The action must be determined by BOTH verdicts, not just validity.
+    for verdict, premise, boundary, expected_action in (
+        ("decline", "attacker_only", "declared_and_consistent", "hardening_note"),
+        ("accept_after_rewrite", "requires_third_party_misconfiguration", "declared_and_violated", "rewrite_then_report"),
+    ):
+        obj = extract(base_text)
+        acceptance = claim(obj, "C1")["acceptance"]
+        acceptance.update(acceptability=verdict, premise_kind=premise, boundary_state=boundary)
+        expect_rejected(f"{verdict} cannot retain report action", rebuild(base_text, obj), ledger_path, expected_action)
+
+    for missing in ("defect", "reachability", "consequence"):
+        obj = extract(base_text)
+        entry = claim(obj, "C1")
+        entry["assertions"] = [a for a in entry["assertions"] if a["type"] != missing]
+        expect_rejected(f"holds requires {missing} coverage", rebuild(base_text, obj), ledger_path, "derive 'needs_more_evidence'")
+    obj = extract(base_text)
+    entry = claim(obj, "C1")
+    entry["assertions"] = [a for a in entry["assertions"] if a["type"] == "precondition"]
+    expect_rejected("only an unresolved precondition cannot establish holds", rebuild(base_text, obj), ledger_path, "derive 'needs_more_evidence'")
+
+    for field, value in (("id", ""), ("source_ref", 123), ("unknown_key", True), ("validity", [])):
+        obj = extract(base_text)
+        claim(obj, "C1")[field] = value
+        expect_rejected(f"schema rejects malformed {field}", rebuild(base_text, obj), ledger_path, field)
+
+    # Pending is a deliverable blocking explanation, never a report.
+    pending = extract(base_text)
+    entry = claim(pending, "C1")
+    entry["acceptance"] = {
+        "premise_kind": "unknown", "acceptability": "pending",
+        "blocking_facts": ["Whether the deployed extension can return an empty response"],
+        "rationale": "The source proves the defect but does not establish control of its trigger.",
+        "evidence_ids": ["E000001"],
+    }
+    entry["action"] = "needs_evidence"
+    entry.pop("submission")
+    pending_text = rebuild(base_text, pending)
+    check("pending can deliver a blocking explanation without divergence or OSS conclusions", not run(pending_text, ledger_path))
+    entry["action"] = "report"
+    expect_rejected("pending cannot be reported", rebuild(base_text, pending), ledger_path, "needs_evidence")
+    entry["action"] = "needs_evidence"
+    for facts in ([], [" "], [123]):
+        entry["acceptance"]["blocking_facts"] = facts
+        expect_rejected("pending must identify concrete missing facts", rebuild(base_text, pending), ledger_path, "blocking_facts")
+    entry["acceptance"]["blocking_facts"] = ["The trigger's controller remains unknown"]
+    entry["acceptance"]["premise_kind"] = "attacker_only"
+    expect_rejected("known premise cannot claim pending", rebuild(base_text, pending), ledger_path, "pending requires")
+
+    # Every caller using loaded evidence receives its integrity failures.
+    ledger_path = stage(tmp)
+    rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    for row in rows:
+        row["artifact"] = row["artifact"].replace("/", "\\")
+    ledger_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    check("legacy Windows artifact paths remain portable", not run(base_text, ledger_path))
+    artifact = ledger_path.parent / "evidence" / "E000001.txt"
+    artifact.write_text("changed after capture", encoding="utf-8")
+    records, ledger_errors = _load_evidence_ledger(str(ledger_path))
+    check("validate carries evidence errors", validate(base_text, records)[0] == 1)
+    check("validate_partial carries evidence errors", va.validate_partial(base_text, records)[0] == 1)
+    command = [sys.executable, str(REPO_ROOT / "runtime" / "validate_adjudication.py"),
+               str(ledger_path.parent / "adjudication-notes.md"), "--evidence-ledger", str(ledger_path)]
+    for extra in ([], ["--phase", "adjudicate"], ["--next"]):
+        result = subprocess.run(command + extra, capture_output=True, text=True, check=False)
+        check(f"corrupt evidence blocks {extra or 'deliver'} readiness",
+              "READY" not in result.stdout and (result.returncode != 0 or result.stdout.startswith("NEXT [evidence]:")))
+
+    ledger_path = stage(tmp)
+    source = ledger_path.parent.parent / "app.php"
+    source.unlink()
+    records, errors = _load_evidence_ledger(str(ledger_path))
+    check("missing source is explicitly unverifiable", any("unverifiable" in error for error in errors))
+    check("missing source cannot pass deliver", validate(base_text, records)[0] == 1)
+    ledger_path = stage(tmp)
+    with patch.object(va.shutil, "which", return_value=None):
+        records, errors = _load_evidence_ledger(str(ledger_path))
+    check("missing rg is explicitly unverifiable", any("unverifiable" in error and "rg" in error for error in errors))
+    check("missing rg cannot pass deliver", validate(base_text, records)[0] == 1)
+    with patch.object(va.subprocess, "run", side_effect=subprocess.TimeoutExpired("rg", 60)):
+        records, errors = _load_evidence_ledger(str(ledger_path))
+    check("timed-out searches cannot pass deliver", validate(base_text, records)[0] == 1 and any("unverifiable" in error for error in errors))
+
+    # New read records bind the captured artifact to the source bytes.
+    ledger_path = stage(tmp)
+    source = ledger_path.parent.parent / "app.php"
+    rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    rows[0]["source_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    ledger_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    check("matching source fingerprint is accepted", not run(base_text, ledger_path))
+    source.write_bytes(source.read_bytes() + b"\n// changed\n")
+    expect_rejected("changed source fingerprint is rejected", base_text, ledger_path, "source changed")
+    source.unlink()
+    expect_rejected("missing fingerprinted source is unverifiable", base_text, ledger_path, "source read is unverifiable")
+
+    ledger_path = stage(tmp)
+    records, _ = _load_evidence_ledger(str(ledger_path))
+    schema = json.loads(va.SCHEMA_PATH.read_text())
+    schema["unsupportedFutureRule"] = True
+    bad_schema = tmp / "future-schema.json"
+    bad_schema.write_text(json.dumps(schema))
+    with patch.object(va, "SCHEMA_PATH", bad_schema):
+        _, errors = validate(base_text, records)
+    check("unsupported schema keywords fail explicitly", any("unsupported schema keyword" in error for error in errors))
 
 if failures:
     print(f"\n{len(failures)} counter-example(s) FAILED: {failures}")

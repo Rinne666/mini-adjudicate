@@ -1,85 +1,69 @@
-# Refutation — {slug}
+# Written Finding — {slug}
 
-> The artifact for a claim whose validity is **`does_not_hold`**, or
-> whose validity is `needs_more_evidence`.
->
-> This is not a report and must not be sent to the maintainer as one.
-> It is the written answer to "we looked, and here is what we found".
-> Its value is that it records *why*, so the next person does not redo
-> the work — and so nobody re-reports the same non-issue.
+> Use for `does_not_hold`, `needs_more_evidence`, `already_fixed`, or
+> `holds` with acceptance `pending`. Retain only the sections relevant to
+> this result. A blocked assessment is not a refutation of the defect.
+> This artifact is not an advisory draft and has not been submitted.
 
 ## Claim as received
 
-> {the claim, in the words it was made}
+> {the original claim}
 
-**Source of the claim**: `{scanner / colleague / advisory / bounty
-report / our own reading}`.
+**Origin**: {scanner / colleague / advisory / supplied report / reading}.
+**Source revision**: {commit / tag actually checked}.
 
-## Verdict
+## Decisions
 
-**`{does_not_hold | needs_more_evidence | already_fixed}`**
+- **Validity**: {does_not_hold / needs_more_evidence / already_fixed / holds}.
+- **Acceptance**: {pending for holds with unknown premise; otherwise not applicable}.
+- **Action**: {no_report / needs_evidence / already_fixed}.
+- **Reason**: {what the captured evidence establishes and what remains unknown}.
 
-One sentence: {what the evidence shows}.
+## Assertions and evidence
 
-## What refutes it
-
-| Assertion | Verdict | Evidence | What it shows |
+| Assertion | Verdict | Evidence IDs and anchor | What it shows |
 |---|---|---|---|
-| | `refuted / confirmed / unresolved / fixed` | `file:line` | |
 
-## The refutation, in detail
+## If refuted: the decisive control or fact
 
-The specific thing that makes the claim false. Quote the guarding
-line, the unreachable condition, or the earlier check that already
-enforces the invariant.
+Quote the guarding expression, unreachable condition, or other evidence.
+Explain why it defeats this claim's particular path and identity; the
+existence of an unrelated check is insufficient.
 
-> `{the code that decides it}`
+## If blocked: facts still needed
 
-Explain in two or three sentences why this defeats the claim — not
-that the code looks safe, but that the claim's own path runs through
-this check and the check holds.
+For `needs_more_evidence`, identify the missing defect/reachability/impact
+fact. For `holds` plus `pending`, preserve the established conditional
+defect and name what prevents classifying its premise. Copy the latter
+facts into `acceptance.blocking_facts` in the canonical JSON.
 
-## Refutation attempts that did not refute
+| Missing fact | Why it changes the decision | Safe observation | Who can observe it |
+|---|---|---|---|
 
-Attempts that looked promising but did not hold up. Recording these
-matters: without them, a reader cannot tell the difference between a
-claim that was carefully killed and one that was never really tested.
+State any incomplete boundary, divergence, or OSS-history checks. Do not
+produce a vulnerability report for this claim until the blocking facts
+are resolved and the assessment and gate have been rerun.
 
-| Attempt | Result |
+## If fixed: scope of the fix
+
+- Fixing commit or guarding line, with captured evidence.
+- Whether all affected paths were covered or a narrower residual remains.
+- Whether the fix is released, and which release was verified.
+- Publication status recorded separately: a published issue is not
+  automatically fixed.
+
+## Other refutation attempts
+
+| Attempt | Result and supporting evidence |
 |---|---|
-| | |
 
-## If `needs_more_evidence`: what is missing
+## What would change the decision
 
-The exact fact that could not be obtained from source, and a safe way
-to observe it. Name it precisely enough that someone else can go get
-it.
+Name the specific new observation that would change validity or
+acceptance, and which part would change. Do not claim that resolving one
+fact necessarily makes the issue reportable under every target policy.
 
-| Missing fact | How to observe it safely | Who can observe it |
-|---|---|---|
+## Submitter note
 
-**Do not report this claim while this is outstanding.** The verdict
-stays `needs_more_evidence` until the fact is in hand.
-
-## If `already_fixed`: where the fix is
-
-- The fixing commit or the guarding line: `file:line` or a SHA.
-- Whether the fix is **complete** — does it cover every path that
-  reached the defect, or only the one that was reported?
-- Whether the fix shipped in a release, and in which.
-
-A partial fix is not the same as a fixed issue, and a partial fix may
-be a new claim with a narrower subject.
-
-## What would change this verdict
-
-The specific new evidence that would flip the verdict to `holds`.
-Without this, a refutation is a dead end; with it, the next reader
-knows exactly where to push.
-
-## Note for the submitter
-
-- This claim is **not** being reported to the maintainer.
-- If the maintainer is already aware of the issue, a note may still be
-  worth sending — but it is a note, not a report, and it is a separate
-  decision from the submitter.
+This is a written assessment for the submitter. No external report or
+message has been sent by this skill.

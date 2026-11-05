@@ -1,0 +1,47 @@
+1: # Security Policy — fixture service
+2:
+3: > The upstream acceptance policy for the `mini-adjudication` fixture.
+4: > The adjudication cites it as `stated` authority: the answers below come
+5: > from this file, not from the adjudicator's own reading of the code.
+6:
+7: ## Reporting channels
+8:
+9: Two channels are accepted. The project states no preference between them.
+10:
+11: 1. **Private advisory flow** — the project's advisory platform. Every
+12:    published advisory for this service came through this flow.
+13: 2. **Security email** — the maintainer address listed in the repository.
+14:
+15: Both are open. Pick **one**. Sending the same report to both is duplicate
+16: intake and reads as spam.
+17:
+18: ## Scope
+19:
+20: In scope: the authentication, administration and share paths of this
+21: service, including the external authentication extension's answer shapes.
+22:
+23: ## Previously published advisories
+24:
+25: | ID | Subject | Classification |
+26: |---|---|---|
+27: | ADV-0001 | An empty extension response was treated as an approval on the admin plane | Security fix |
+28: | ADV-0002 | The first administrator could be registered on an uninitialized instance without authentication | Hardening |
+29:
+30: ## How classification works here
+31:
+32: An empty response from the extension is a documented answer shape, not a
+33: failure. The product says so in the extension interface itself: the
+34: extension answers with the payload it wants stored, or an empty string
+35: when it has no opinion.
+36:
+37: A path that treats an empty answer as anything other than "no opinion"
+38: violates a rule the product has already stated, in the same release, on
+39: the same input. That is a security fix, not hardening — the difference
+40: between ADV-0001 and ADV-0002 is exactly this: a declared invariant that
+41: the code violates on one path is a security fix; a missing control that
+42: the product never claimed to have is hardening.
+43:
+44: A finding that depends on an operator misconfiguring the service is
+45: usually hardening. A finding that depends on a value the deployment
+46: supplies, and that no amount of source reading can settle, is not yet a
+47: finding at all.

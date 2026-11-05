@@ -56,6 +56,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import re
@@ -63,6 +64,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+try:
+    from .schema_validation import check_schema, validate_schema
+    from .workspace import STATE_START, check_rendered, read_state
+except ImportError:
+    from schema_validation import check_schema, validate_schema
+    from workspace import STATE_START, check_rendered, read_state
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = REPO_ROOT / "schemas" / "adjudication.schema.json"
@@ -89,6 +97,7 @@ ACTIONS = {
 ASSERTION_VERDICTS = {"confirmed", "refuted", "unresolved", "fixed"}
 ASSERTION_TYPES = {"defect", "reachability", "consequence", "precondition"}
 PREMISE_KINDS = {
+    "unknown",
     "attacker_only",
     "requires_operator_decision",
     "requires_ambient_state",
@@ -96,7 +105,13 @@ PREMISE_KINDS = {
 }
 BOUNDARY_STATES = {"declared_and_violated", "not_declared", "declared_and_consistent"}
 DIVERGENCE_STATES = {"present", "absent"}
-ACCEPTABILITY = {"accept", "accept_after_rewrite", "decline"}
+ACCEPTABILITY = {"accept", "accept_after_rewrite", "decline", "pending"}
+ACCEPTANCE_ACTIONS = {
+    "accept": "report",
+    "accept_after_rewrite": "rewrite_then_report",
+    "decline": "hardening_note",
+    "pending": "needs_evidence",
+}
 TARGET_KINDS = {"open_source", "closed_product", "web_service"}
 POLICY_SOURCES = {"stated", "derived", "none"}
 CLASSIFICATIONS = {"security_fix", "hardening", "bug_fix", "wontfix", "unknown"}
@@ -148,6 +163,11 @@ COVERAGE_MARKERS = (
 
 def _extract_adjudication_table(markdown_text: str) -> tuple[dict | None, str | None]:
     """Pull the adjudication-table JSON object out of the notes file."""
+    if STATE_START in markdown_text:
+        try:
+            return read_state(markdown_text), None
+        except (ValueError, TypeError) as exc:
+            return None, f"canonical adjudication state did not parse: {exc}"
     fences = re.findall(
         r"```(?:json)?\s*(\{.*?\})\s*```",
         markdown_text,
@@ -186,14 +206,28 @@ def _missing_coverage_sections(markdown_text: str) -> list[str]:
     return [name for name, marker in COVERAGE_MARKERS if not marker.search(markdown_text)]
 
 
+class EvidenceRecords(dict[str, dict]):
+    """Records retain verification errors across every validation entry point."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.verification_errors: list[str] = []
+
+
 def _load_evidence_ledger(path_arg: str) -> tuple[dict[str, dict], list[str]]:
     """Load evidence records and verify saved artifacts and their hashes."""
     ledger = Path(path_arg).resolve()
+    records = EvidenceRecords()
+    errors = records.verification_errors
     if not ledger.exists():
-        return {}, [f"evidence ledger not found: {ledger}"]
-    records: dict[str, dict] = {}
-    errors: list[str] = []
-    for line_number, line in enumerate(ledger.read_text(encoding="utf-8").splitlines(), 1):
+        errors.append(f"evidence ledger not found: {ledger}")
+        return records, errors
+    try:
+        ledger_lines = ledger.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        errors.append(f"evidence ledger is unverifiable: {exc}")
+        return records, errors
+    for line_number, line in enumerate(ledger_lines, 1):
         if not line.strip():
             continue
         try:
@@ -216,7 +250,7 @@ def _load_evidence_ledger(path_arg: str) -> tuple[dict[str, dict], list[str]]:
         if not isinstance(artifact_name, str) or not artifact_name:
             errors.append(f"{evidence_id} has no artifact path")
             continue
-        artifact = (ledger.parent / artifact_name).resolve()
+        artifact = (ledger.parent / _normalize_rel(artifact_name)).resolve()
         try:
             artifact.relative_to(ledger.parent)
         except ValueError:
@@ -225,11 +259,32 @@ def _load_evidence_ledger(path_arg: str) -> tuple[dict[str, dict], list[str]]:
         if not artifact.is_file():
             errors.append(f"{evidence_id} artifact is missing: {artifact_name}")
             continue
-        artifact_bytes = artifact.read_bytes()
+        try:
+            artifact_bytes = artifact.read_bytes()
+        except OSError as exc:
+            errors.append(f"{evidence_id} artifact is unverifiable: {exc}")
+            continue
         if len(artifact_bytes) != record.get("artifact_bytes"):
             errors.append(f"{evidence_id} artifact size does not match the ledger")
         if hashlib.sha256(artifact_bytes).hexdigest() != record.get("artifact_sha256"):
             errors.append(f"{evidence_id} artifact hash does not match the ledger")
+        if record.get("kind") == "read" and "source_sha256" in record:
+            source_hash = record.get("source_sha256")
+            cwd = record.get("cwd")
+            source_path = record.get("path")
+            if not isinstance(source_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", source_hash):
+                errors.append(f"{evidence_id} source_sha256 is invalid")
+            elif not isinstance(cwd, str) or not isinstance(source_path, str):
+                errors.append(f"{evidence_id} source read is unverifiable: missing source location")
+            else:
+                source = (ledger.parent / _normalize_rel(cwd) / _normalize_rel(source_path)).resolve()
+                try:
+                    actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+                except OSError as exc:
+                    errors.append(f"{evidence_id} source read is unverifiable: {exc}")
+                else:
+                    if actual_hash != source_hash:
+                        errors.append(f"{evidence_id} source changed since capture (source_sha256 mismatch)")
     errors.extend(_reverify_ledger_searches(ledger.parent, records))
     return records, errors
 
@@ -244,34 +299,33 @@ def _reverify_zero_match(ledger_parent: Path, record: dict) -> str | None:
 
     A ledger entry that says "no matches" is a claim about the source.
     If the search now matches, the claim is false and every verdict that
-    leaned on it is unsupported. If the source tree is not reachable from
-    here, or `rg` is not installed, the check is skipped rather than
-    failed: the evidence is unverifiable here, not wrong.
+    leaned on it is unsupported. Unavailable source or tooling makes the
+    evidence unverifiable, distinct from a contradiction but still
+    blocking a ready verdict.
     """
     base_raw = record.get("cwd")
     paths = record.get("paths")
     query = record.get("query")
     globs = record.get("globs")
     if not isinstance(base_raw, str) or not base_raw:
-        return None
-    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
-        return None
+        return "unverifiable zero-match search: missing working directory"
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p for p in paths):
+        return "unverifiable zero-match search: missing search paths"
     if not isinstance(query, str) or not query.strip():
-        return None
+        return "unverifiable zero-match search: missing query"
     if not isinstance(globs, list) or not all(isinstance(g, str) for g in globs):
-        return None
+        return "unverifiable zero-match search: invalid globs"
     base = (ledger_parent / Path(_normalize_rel(base_raw))).resolve()
     if not base.is_dir():
-        return None
+        return f"unverifiable zero-match search: source directory unavailable: {base}"
     # The recorded search paths must all exist under the recorded base.
     # When they do not, the workspace has been moved or copied and the
-    # source tree is not reachable from here — skipping is the honest
-    # answer, and the alternative (running rg in the wrong directory)
-    # reports a spurious failure that poisons the gate.
+    # source tree is not reachable from here. Do not conflate inability
+    # to repeat the search with successfully confirming its absence.
     if not all((base / _normalize_rel(path)).exists() for path in paths):
-        return None
+        return "unverifiable zero-match search: a recorded source path is unavailable"
     if shutil.which("rg") is None:
-        return None
+        return "unverifiable zero-match search: rg is not installed"
     command = [
         "rg",
         "--line-number",
@@ -288,8 +342,8 @@ def _reverify_zero_match(ledger_parent: Path, record: dict) -> str | None:
     command.extend(_normalize_rel(path) for path in paths)
     try:
         result = subprocess.run(command, capture_output=True, cwd=base, timeout=60, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"unverifiable zero-match search: {type(exc).__name__}"
     if result.returncode == 1:
         return None  # still zero-match: the absence still holds
     if result.returncode == 0:
@@ -403,14 +457,20 @@ def _derive_validity(assertion_types: list[str], assertion_verdicts: list[str]) 
         return "does_not_hold"
     if "fixed" in assertion_verdicts:
         return "already_fixed"
+    required = {"defect", "reachability", "consequence"}
+    confirmed = {atype for atype, verdict in zip(assertion_types, assertion_verdicts) if verdict == "confirmed"}
+    if not required.issubset(confirmed):
+        return "needs_more_evidence"
     for atype, averdict in zip(assertion_types, assertion_verdicts):
         if averdict == "unresolved" and atype != "precondition":
             return "needs_more_evidence"
     return "holds"
 
 
-def _derive_acceptability(premise_kind: str, boundary_state: str, divergence_state: str) -> str:
+def _derive_acceptability(premise_kind: str, boundary_state: str | None, divergence_state: str | None) -> str:
     """Derive the acceptability verdict mechanically from the three answers."""
+    if premise_kind == "unknown":
+        return "pending"
     if boundary_state == "declared_and_consistent":
         return "decline"
     if premise_kind == "attacker_only" and divergence_state == "present":
@@ -441,6 +501,60 @@ def _special_config_consistent(special_config_required: object, premise_kind: ob
 
 def _non_empty_str(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _validate_structure(obj: dict, phase: str, *, partial: bool = False) -> list[str]:
+    """Execute the checked-in schema, relaxing only work not yet due."""
+    try:
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"schema could not be loaded: {exc}"]
+    errors = check_schema(schema)
+    if errors:
+        return errors
+    schema["required"] = list(REQUIRED_TOP_FIELDS[phase])
+    try:
+        fields = schema["properties"]["claims"]["items"]["properties"]
+    except (KeyError, TypeError):
+        return ["schema is missing the claims item property definitions"]
+    if not partial:
+        if phase == "adjudicate":
+            fields["acceptance"] = {}
+        if phase != "deliver":
+            for key in ("subject", "original_subject", "submission", "artifact"):
+                fields[key] = {}
+            schema["properties"]["work_queue"] = {}
+            schema["properties"]["channel"] = {}
+    value = obj
+    if partial:
+        value = copy.deepcopy(obj)
+        # A null verdict/action is an explicit unfinished row, not a
+        # verdict. Other present values are still checked by the schema.
+        if isinstance(value.get("claims"), list):
+            for claim in value["claims"]:
+                if isinstance(claim, dict):
+                    for key in ("validity", "action"):
+                        if claim.get(key) is None:
+                            claim.pop(key, None)
+    return validate_schema(value, schema, partial=partial)
+
+
+def _validate_action(at: str, claim: dict, *, assess: bool) -> list[str]:
+    validity = claim.get("validity")
+    expected = {
+        "does_not_hold": "no_report",
+        "needs_more_evidence": "needs_evidence",
+        "already_fixed": "already_fixed",
+    }.get(validity)
+    if validity == "holds":
+        acceptance = claim.get("acceptance")
+        if assess and isinstance(acceptance, dict):
+            expected = ACCEPTANCE_ACTIONS.get(acceptance.get("acceptability"))
+        if expected is None and claim.get("action") not in ACCEPTANCE_ACTIONS.values():
+            return [f"{at}.action must be report / rewrite_then_report / hardening_note / needs_evidence when validity is 'holds'"]
+    if expected is not None and claim.get("action") != expected:
+        return [f"{at}.action must be {expected!r} for validity {validity!r} and its acceptance verdict"]
+    return []
 
 
 def _subject_is_consequence(subject: str) -> bool:
@@ -768,7 +882,7 @@ def _validate_claims(obj: dict, records: dict[str, dict], phase: str = "deliver"
                     errors.append(f"{at} has validity 'holds' and requires an acceptance object")
                 else:
                     errors.extend(_validate_acceptance(at, acceptance, records))
-                    if target_kind == "open_source":
+                    if target_kind == "open_source" and acceptance.get("acceptability") != "pending":
                         errors.extend(_validate_oss_verification(at, acceptance.get("oss_verification"), records))
             else:
                 if acceptance is not None:
@@ -777,17 +891,7 @@ def _validate_claims(obj: dict, records: dict[str, dict], phase: str = "deliver"
                         f"a claim that does not hold is not 'unacceptable', it is not a vulnerability"
                     )
 
-        # Action must match the validity verdict.
-        if validity == "does_not_hold" and action != "no_report":
-            errors.append(f"{at}.action must be 'no_report' when validity is 'does_not_hold'")
-        if validity == "needs_more_evidence" and action != "needs_evidence":
-            errors.append(f"{at}.action must be 'needs_evidence' when validity is 'needs_more_evidence'")
-        if validity == "already_fixed" and action != "already_fixed":
-            errors.append(f"{at}.action must be 'already_fixed' when validity is 'already_fixed'")
-        if validity == "holds" and action not in {"report", "rewrite_then_report", "hardening_note"}:
-            errors.append(
-                f"{at}.action must be report / rewrite_then_report / hardening_note when validity is 'holds'"
-            )
+        errors.extend(_validate_action(at, claim, assess=phase in {"assess", "deliver"}))
         if validity != "holds" and action in {"report", "rewrite_then_report"}:
             errors.append(f"{at} has validity {validity!r} and must not be actioned as a report")
 
@@ -826,14 +930,11 @@ def _validate_claims(obj: dict, records: dict[str, dict], phase: str = "deliver"
 
 def _validate_acceptance(at: str, acceptance: dict, records: dict[str, dict]) -> list[str]:
     errors: list[str] = []
-    for required in (
-        "premise_kind",
-        "boundary_state",
-        "divergence_state",
-        "acceptability",
-        "rationale",
-        "evidence_ids",
-    ):
+    pending = acceptance.get("premise_kind") == "unknown"
+    required_fields = ["premise_kind", "acceptability", "rationale", "evidence_ids"]
+    if not pending:
+        required_fields.extend(["boundary_state", "divergence_state"])
+    for required in required_fields:
         if required not in acceptance:
             errors.append(f"{at}.acceptance missing required field: {required}")
 
@@ -843,12 +944,12 @@ def _validate_acceptance(at: str, acceptance: dict, records: dict[str, dict]) ->
             f"{at}.acceptance.premise_kind must be one of {sorted(PREMISE_KINDS)}, got {premise_kind!r}"
         )
     boundary_state = acceptance.get("boundary_state")
-    if boundary_state not in BOUNDARY_STATES:
+    if (not pending or boundary_state is not None) and boundary_state not in BOUNDARY_STATES:
         errors.append(
             f"{at}.acceptance.boundary_state must be one of {sorted(BOUNDARY_STATES)}, got {boundary_state!r}"
         )
     divergence_state = acceptance.get("divergence_state")
-    if divergence_state not in DIVERGENCE_STATES:
+    if (not pending or divergence_state is not None) and divergence_state not in DIVERGENCE_STATES:
         errors.append(
             f"{at}.acceptance.divergence_state must be one of {sorted(DIVERGENCE_STATES)}, got {divergence_state!r}"
         )
@@ -857,12 +958,22 @@ def _validate_acceptance(at: str, acceptance: dict, records: dict[str, dict]) ->
         errors.append(
             f"{at}.acceptance.acceptability must be one of {sorted(ACCEPTABILITY)}, got {acceptability!r}"
         )
+    if not _non_empty_str(acceptance.get("rationale")):
+        errors.append(f"{at}.acceptance.rationale must be non-empty")
+    if pending:
+        facts = acceptance.get("blocking_facts")
+        if not isinstance(facts, list) or not facts or not all(_non_empty_str(fact) for fact in facts):
+            errors.append(f"{at}.acceptance.blocking_facts must name the missing premise facts as a non-empty string array")
+        if acceptability != "pending":
+            errors.append(f"{at}.acceptance unknown premise requires acceptability 'pending'")
+    elif acceptability == "pending":
+        errors.append(f"{at}.acceptance pending requires premise_kind 'unknown'")
 
     # The acceptability verdict must be derived from the three answers.
     if (
         premise_kind in PREMISE_KINDS
-        and boundary_state in BOUNDARY_STATES
-        and divergence_state in DIVERGENCE_STATES
+        and (pending or boundary_state in BOUNDARY_STATES)
+        and (pending or divergence_state in DIVERGENCE_STATES)
         and acceptability in ACCEPTABILITY
     ):
         derived = _derive_acceptability(premise_kind, boundary_state, divergence_state)
@@ -983,10 +1094,13 @@ def validate(text: str, records: dict[str, dict], phase: str = "deliver") -> tup
     """
     if phase not in PHASES:
         raise ValueError(f"unknown phase: {phase!r}")
-    errors: list[str] = []
+    errors = list(getattr(records, "verification_errors", []))
     obj, extract_error = _extract_adjudication_table(text)
     if obj is None:
-        return 1, [extract_error or "adjudication table could not be extracted"]
+        return 1, errors + [extract_error or "adjudication table could not be extracted"]
+    schema_errors = _validate_structure(obj, phase)
+    if schema_errors:
+        return 1, errors + schema_errors
 
     for required in REQUIRED_TOP_FIELDS[phase]:
         if required not in obj:
@@ -1009,6 +1123,7 @@ def validate(text: str, records: dict[str, dict], phase: str = "deliver") -> tup
     errors.extend(_validate_claims(obj, records, phase=phase))
 
     if phase == "deliver":
+        errors.extend(check_rendered(text))
         errors.extend(_validate_work_queue(obj, records))
         errors.extend(_validate_channel(obj))
 
@@ -1042,6 +1157,7 @@ def validate_partial(text: str, records: dict[str, dict], deliver_claimed: bool 
 
     Returns (0, []) when there is nothing yet to hold consistent.
     """
+    errors = list(getattr(records, "verification_errors", []))
     obj, extract_error = _extract_adjudication_table(text)
     if obj is None:
         err = extract_error or ""
@@ -1050,15 +1166,14 @@ def validate_partial(text: str, records: dict[str, dict], deliver_claimed: bool 
         # ```json fence with no extractable object falls on the
         # corruption side: someone started the table and broke it.
         if "did not parse" in err or "```json" in text:
-            return 1, [err]
-        return 0, []
+            return 1, errors + [err]
+        return (1 if errors else 0), errors
+    schema_errors = _validate_structure(obj, "deliver", partial=True)
+    if schema_errors:
+        return 1, errors + schema_errors
 
-    errors: list[str] = []
-
-    # The target profile and the coverage sections are scaffolded at
-    # intake; losing either is corruption, not progress.
-    if obj.get("target") is not None:
-        errors.extend(_validate_target(obj))
+    # Schema checks present target values, while blank intake fields can
+    # remain unfinished. The full target profile is owed at phase gates.
     missing_sections = _missing_coverage_sections(text)
     if missing_sections:
         errors.append(
@@ -1144,16 +1259,7 @@ def validate_partial(text: str, records: dict[str, dict], deliver_claimed: bool 
                 )
 
         if validity in VALIDITY and action in ACTIONS:
-            if validity == "does_not_hold" and action != "no_report":
-                errors.append(f"{at}.action must be 'no_report' when validity is 'does_not_hold'")
-            if validity == "needs_more_evidence" and action != "needs_evidence":
-                errors.append(f"{at}.action must be 'needs_evidence' when validity is 'needs_more_evidence'")
-            if validity == "already_fixed" and action != "already_fixed":
-                errors.append(f"{at}.action must be 'already_fixed' when validity is 'already_fixed'")
-            if validity == "holds" and action not in {"report", "rewrite_then_report", "hardening_note"}:
-                errors.append(
-                    f"{at}.action must be report / rewrite_then_report / hardening_note when validity is 'holds'"
-                )
+            errors.extend(_validate_action(at, claim, assess=True))
 
         acceptance = claim.get("acceptance")
         if validity in VALIDITY and validity != "holds" and acceptance is not None:
@@ -1163,7 +1269,8 @@ def validate_partial(text: str, records: dict[str, dict], deliver_claimed: bool 
             )
         if validity == "holds" and isinstance(acceptance, dict):
             errors.extend(_validate_acceptance(at, acceptance, records))
-            if isinstance(obj.get("target"), dict) and obj["target"].get("kind") == "open_source":
+            if (isinstance(obj.get("target"), dict) and obj["target"].get("kind") == "open_source"
+                    and acceptance.get("acceptability") != "pending"):
                 errors.extend(_validate_oss_verification(at, acceptance.get("oss_verification"), records))
 
         subject = claim.get("subject")
@@ -1174,7 +1281,7 @@ def validate_partial(text: str, records: dict[str, dict], deliver_claimed: bool 
             premise_kind = acceptance.get("premise_kind") if isinstance(acceptance, dict) else None
             errors.extend(_validate_submission(at, claim.get("submission"), premise_kind))
 
-        if claim.get("evidence_ids") is not None and not _valid_evidence_ids(claim.get("evidence_ids"), records):
+        if claim.get("evidence_ids") and not _valid_evidence_ids(claim.get("evidence_ids"), records):
             errors.append(f"{at} must cite existing evidence_ids")
 
     if deliver:
@@ -1225,8 +1332,6 @@ def main(argv: list[str] | None = None) -> int:
     ledger_errors: list[str] = []
     if args.evidence_ledger:
         records, ledger_errors = _load_evidence_ledger(args.evidence_ledger)
-        for err in ledger_errors:
-            print(f"FAIL: {err}", file=sys.stderr)
     else:
         print(
             "FAIL: --evidence-ledger is required; an adjudication without cited "
@@ -1238,6 +1343,11 @@ def main(argv: list[str] | None = None) -> int:
     text = notes.read_text(encoding="utf-8")
 
     if args.next:
+        if ledger_errors:
+            print(f"NEXT [evidence]: {ledger_errors[0]}")
+            if len(ledger_errors) > 1:
+                print(f"  ({len(ledger_errors) - 1} more evidence requirement(s) behind this one)")
+            return 0
         for phase in PHASES:
             code, errors = validate(text, records, phase=phase)
             if code != 0:
@@ -1254,8 +1364,6 @@ def main(argv: list[str] | None = None) -> int:
     code, errors = validate(text, records, phase=args.phase)
     for err in errors:
         print(f"FAIL: {err}", file=sys.stderr)
-    if ledger_errors:
-        code = 1
     if code == 0:
         print(
             f"OK: {args.phase}-phase adjudication structure valid ({len(records)} evidence record(s)); "

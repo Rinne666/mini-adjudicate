@@ -1,173 +1,109 @@
-# Premise Analysis — Acceptance Question 1
+# Premise Analysis
 
-> Load this every time the premise classification is not obvious, and
-> whenever Q1 is being answered for a claim whose validity is `holds`.
->
-> This is the **acceptance** stage's first question, not the validity
-> stage. A claim that does not hold never reaches it. The premise
-> answers "who creates the gating condition" — a question about the
-> maintainer's review, not about whether the code is wrong.
+Read this when classifying who creates the condition for a holding claim,
+or interpreting its acceptance result. Keep this separate from technical
+validity: a confirmed conditional defect may still lack the facts needed
+to assess report readiness.
 
-The upstream rejection is almost always some form of *"the window
-requires an operator to have done X"*. So the useful cut is not "is it
-exploitable" but **"who creates the gating condition?"**
+## Classify the condition
 
-A premise that is misclassified in either direction loses. Inflating
-`attacker_only` gets the report closed for a deployment reason.
-Inflating `requires_operator_decision` throws away a real finding and
-spends credibility for nothing.
+| `premise_kind` | Meaning and evidence needed |
+|---|---|
+| `attacker_only` | On the stated supported deployment, the attacker can create the trigger without another actor changing the system. Cite the entry point and attacker-controlled values. |
+| `requires_operator_decision` | A separate operator decision gates the attack. Cite the setting or deployment action and distinguish supported configuration from weakening a control. |
+| `requires_ambient_state` | The trigger depends on concurrent activity, ordering, or system state the attacker has not been shown to control. Cite the dependency. |
+| `requires_third_party_misconfiguration` | The trigger depends on extension/downstream behavior. Despite the legacy name, the behavior may be a documented response, not operator negligence. State the exact dependency. |
+| `unknown` | Available evidence cannot establish who creates the trigger. Record what observation would settle it. |
 
----
+Do not infer attacker control merely because an input is allowed by an
+interface. For example, a documented empty auth-hook response does not
+by itself show that a requester can make a particular deployment return
+it. Conversely, enabling a supported feature is not automatically a
+security-weakening action. State the deployment and actor capabilities
+precisely before choosing the closest category.
 
-## 1. The four kinds
+For a race, distinguish an attacker who controls both operations or can
+hold a window open from one who relies on unrelated traffic. Retrying a
+probabilistic condition can establish reproducibility, but it does not
+make every environmental fact attacker-controlled.
 
-### `attacker_only`
+A mixed premise retains every material dependency. Do not hide an
+operator decision behind an attacker-controlled final request. If the
+categories fit imperfectly, document the limitation in `rationale`; do
+not rewrite the evidence to obtain a preferred matrix result.
 
-The attacker, acting alone, creates every precondition. The system is
-in its documented default or normally-configured state, and the
-attacker's request alone moves it into the vulnerable state.
+## Unknown premise is a deliverable assessment
 
-**Test**: remove the operator from the timeline entirely. Does the
-vulnerability still reproduce? If yes, it is `attacker_only`.
+Use this combination when validity is `holds` but the premise is not yet
+classifiable:
 
-### `requires_operator_decision`
+```json
+{
+  "premise_kind": "unknown",
+  "acceptability": "pending",
+  "rationale": "The defect is established; control over its trigger is not.",
+  "blocking_facts": [
+    "Observe whether the configured extension can return an empty answer for an attacker-selected username, using an isolated test account."
+  ],
+  "evidence_ids": ["E000001"]
+}
+```
 
-An operator must take an action that is *unusual, risky, or contrary to
-guidance* before the attacker can proceed:
+This is an acceptance-object example, not a complete claim. Set the
+claim's `action` to `needs_evidence`. Use real evidence IDs. Boundary and
+divergence may be omitted while pending; if supplied, their values and
+support must be valid. OSS verification may also remain unfinished for
+this pending claim. Explain those limitations in the written finding.
 
-- exposing a not-yet-initialized instance on a reachable interface;
-- leaving a protection mechanism empty or unset that the product ships
-  a way to set;
-- choosing a weak value the documentation steers away from;
-- choosing an unsupported or third-party component.
+The notes can pass delivery with pending acceptance and specific blocking
+facts, but cannot turn that claim into an advisory draft. Do not change
+technical validity to `does_not_hold` merely to finish the workflow.
 
-The distinguishing feature: a competent operator following the
-documentation would not be in this state. That is exactly why upstream
-calls it a deployment issue — the code behaved as designed for the
-configuration the operator chose.
+## Acceptance matrix
 
-### `requires_ambient_state`
+The runtime preserves the following deterministic **heuristic**. Rows are
+applied in order. It estimates report readiness from recorded inputs; it
+does not predict an external reviewer's decision or replace program rules.
 
-Needs a race window, a specific interleaving, another instance's state,
-or a concurrent operation. Often the audit's `timing_dependency` or
-`data_state` condition.
+| Condition | Derived `acceptability` |
+|---|---|
+| Premise `unknown` | `pending` |
+| Otherwise, boundary `declared_and_consistent` | `decline` |
+| Premise `attacker_only`, divergence `present` | `accept` |
+| Premise `attacker_only`, divergence `absent` | `accept_after_rewrite` |
+| Premise `requires_third_party_misconfiguration`, divergence `present` | `accept_after_rewrite` |
+| Other classified combinations | `decline` |
 
-Two sub-cases differ sharply:
+`accept_after_rewrite` is broader than fixing a consequence-style title.
+Without a comparison path, the report must establish the violated
+invariant directly. With a third-party dependency, it must explain the
+product's responsibility and disclose the dependency. Preserve
+`original_subject`, write the improved invariant in `subject`, and use
+`rewrite_then_report`. If the original title already names an invariant,
+record it honestly and improve the argument; do not invent a bad title.
 
-- **The window is attacker-controlled** (they can retry, spam, or hold
-  it open) → closer to `attacker_only`.
-- **The window is probabilistic and the attacker just retries** → the
-  outcome is reliably reachable but the *moment* is not
-  attacker-controlled. The defect is real (a nondeterministic
-  authorization result is a real defect), but the report must lead
-  with "the same request returns different authorization results",
-  not with the consequence.
+The operator/ambient rows remain conservative even with a divergence.
+A `decline` here means this heuristic recommends against a vulnerability
+report, not that all programs reject such defects. Compare the outcome
+with the target's actual scope and record any conflict or unsupported
+assumption. Do not present the heuristic as a maintainer decision.
 
-### `requires_third_party_misconfiguration`
+## Evidence and review
 
-An operator-configured extension misbehaves: an auth hook returns an
-empty body, a plugin faults, a downstream endpoint misbehaves.
+For each classified premise, identify the attacker's action, the separate
+gating condition, and the line or observed fact connecting them. A
+precondition that controls whether a path exists belongs in reachability;
+a fact that controls whether harm occurs belongs in consequence. Their
+uncertainty cannot be moved into premise analysis just to preserve `holds`.
 
-**This is the subtle one, and it is not operator weakness.**
-Configuring a documented auth hook correctly is not "choosing an
-insecure configuration". An extension answering with an empty body is
-a normal answer shape, and the product's job is to treat that as an
-authentication failure — not as "the user has no password, let me set
-one".
+The current runtime also rejects
+`special_config_required: true` with `attacker_only`. Describe the literal
+configuration and its supported status separately so reviewers can assess
+what that coarse consistency rule does and does not express. A non-default
+supported mode is not, by itself, evidence that a platform will reject a
+report; consult its actual policy.
 
-The defect is in the product's handling of the extension's output, and
-the product controls that handling. So this is closer to `attacker_only`
-than the name suggests.
-
-**But the attack's shape still needs care.** If the trigger is "the hook
-is broken", the attacker is exploiting an outage rather than the
-operator's configuration. Lead with the product's failure to fail
-closed, and state the premise as "a configured extension answered
-empty" — factual, and not an accusation against the operator.
-
----
-
-## 2. Mixed premises resolve to the operator-dependent kind
-
-If the attacker's action requires an operator decision to have happened
-first, the operator's decision gates the timeline. Do not split the
-difference and label it half-clean.
-
-A real example: a bootstrap check fails open when the admin-state
-query errors. The proof was exact, the reproduction worked, and the
-code was wrong. But the window required an instance that was started
-with no administrator and no installation code, exposed to an untrusted
-network. The maintainer closed it: *"The window needs an instance
-started with no admin and no installation_code, whose setup screen was
-already open to anyone."*
-
-The premise was `requires_operator_decision`, and it should have been
-recorded as such before the report was written. Splitting it — "well,
-the timing part is attacker-influenced" — would not have helped; the
-maintainer read the operator's exposure as the boundary.
-
----
-
-## 3. Classify with evidence, not with intuition
-
-The premise kind is a claim about the code and the deployment, so it
-needs a citation like any other claim:
-
-- **The operator's action**: the config field, the startup path, the
-  code that leaves the state reachable. `file:line`.
-- **The attacker's action**: the request that reaches the vulnerable
-  state. `file:line`.
-- **The gate**: the specific point where the operator's action is
-  required before the attacker's request can proceed.
-
-When the gate cannot be located in the source, the premise is
-**`NEEDS-RUNTIME`**, not a guess. An acceptability verdict needs a
-classified premise, so an unresolved premise blocks the report — it
-does not make the claim untrue, and it is not the validity verdict's
-business.
-
----
-
-## 4. What to do when the premise is operator-dependent
-
-A claim with an operator-dependent premise is not automatically
-unreportable. It is automatically **not reportable in that framing**.
-Three ways forward:
-
-1. **Find a divergence.** If another path in the same version refuses
-   what this path allows, the divergence is the subject, and the
-   operator-dependent part becomes a stated precondition rather than the
-   whole claim. This is the strongest move.
-2. **Find the operator-independent residue.** A related invariant that
-   holds regardless of deployment — "the provider layer permits a second
-   administrator to be created" — is a different subject with a
-   different premise.
-3. **Convert it to hardening.** If neither exists, the defect is still
-   real and worth offering, but as a patch or a hardening note, not as a
-   vulnerability report. Spending the report on it costs credibility
-   that the next report needs.
-
-Note the mapping to the acceptability verdict: a clean premise with a
-divergence is `accept`; a clean premise without one is
-`accept_after_rewrite`; a third-party premise with a divergence is
-`accept_after_rewrite`; everything else is `decline`. The
-`requires_third_party_misconfiguration` kind lands in
-`accept_after_rewrite` rather than `decline` because configuring a
-documented extension correctly is not an operator weakening — the
-product's own handling of the extension's output is what is broken.
-
----
-
-## 5. Checklist for a premise entry
-
-- [ ] The operator's action is cited (`file:line`), or the premise is
-      `attacker_only` because there is no operator action at all.
-- [ ] The attacker's action is cited (`file:line`).
-- [ ] The gate — where the operator's action becomes required — is
-      identified.
-- [ ] The premise kind matches the evidence, in both directions.
-- [ ] A configured-but-correct third-party extension is **not** counted
-      as operator weakening.
-- [ ] A premise that cannot be located in source is `NEEDS-RUNTIME`,
-      and its finding is not `send`.
-- [ ] The residual premise is stated in the report, not hidden.
+During final review, challenge both overstatements of attacker control
+and unsupported dismissals. For pending claims, check that each blocking
+fact is observable and that the proposed observation addresses the missing
+fact without executing target code outside available isolation.

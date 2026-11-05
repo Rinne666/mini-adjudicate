@@ -38,6 +38,7 @@ from validate_adjudication import (  # noqa: E402
     validate,
     validate_partial,
 )
+from workspace import initial_notes
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = REPO_ROOT / "fixtures" / "mini-adjudication"
@@ -138,6 +139,10 @@ check("partial: unparseable JSON fence blocks",
 check("partial: empty claims list passes (intake not done)",
       validate_partial(rebuild(text, {**obj, "claims": []}), records)[0] == 0)
 
+intake = initial_notes("example project", "open_source", "", ["A claim awaiting investigation"])
+check("partial: initialized workspace permits blank intake fields", validate_partial(intake, {})[0] == 0)
+check("deliver: initialized workspace is not complete", validate(intake, {})[0] == 1)
+
 # A half-written assertion row and an unset validity: honest mid-work.
 _, mid_work, _ = load()
 c1 = claim(mid_work, "C1")
@@ -198,6 +203,15 @@ def make_project() -> tuple[Path, Path, Path]:
             shutil.copy2(item, workspace / item.name)
         elif item.is_dir():
             shutil.copytree(item, workspace / item.name)
+    # Captured absence searches must remain reproducible in this copied
+    # workspace. Bind their cwd to a local copy of the original sources.
+    source_root = project / "source"
+    shutil.copytree(FIXTURE, source_root / "fixtures" / "mini-adjudication")
+    ledger = workspace / "evidence.jsonl"
+    rows = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    for row in rows:
+        row["cwd"] = "../source"
+    ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
     return project, workspace, workspace / "adjudication-notes.md"
 
 
@@ -215,13 +229,17 @@ code, out = run_gate(project, "t-valid")
 check("stop_gate: valid delivered state passes", code == 0 and out == "", out)
 
 # Fresh template copy: intake not done, silent pass.
+for artifact in workspace.glob("*.md"):
+    if artifact.name.startswith(("advisory", "refutation", "submission-summary")):
+        artifact.unlink()
 shutil.copy2(REPO_ROOT / "templates" / "adjudication-notes.md", notes_path)
 code, out = run_gate(project, "t-fresh")
 check("stop_gate: fresh template copy passes", code == 0 and out == "", out)
 
 # Broken JSON fence: corruption blocks.
 notes_path.write_text(
-    notes_path.read_text(encoding="utf-8") + "\n```json\n{\n```\n", encoding="utf-8"
+    notes_path.read_text(encoding="utf-8").replace('"claims": []', '"claims": [', 1),
+    encoding="utf-8",
 )
 code, out = run_gate(project, "t-corrupt")
 blocked = code == 0 and out.startswith("{") and json.loads(out).get("decision") == "block"

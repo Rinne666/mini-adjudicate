@@ -22,23 +22,25 @@ MAX_CONTEXT_CHARS = 1200
 
 
 def main() -> int:
-    result = subprocess.run(
-        [sys.executable or "python", str(RUNTIME_DIR / "check_skill_loaded.py")],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode == 0:
-        return 0
-
-    detail = (result.stderr or result.stdout or "").strip().splitlines()
+    try:
+        result = subprocess.run(
+            [sys.executable, str(RUNTIME_DIR / "check_skill_loaded.py")],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode == 0:
+            return 0
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        detail = [f"local integrity check unavailable: {exc}"]
     shown = "\n".join(detail[:6])[:MAX_CONTEXT_CHARS]
     context = (
-        "⚠️ mini-adjudication skill freshness check FAILED — the SKILL.md / references / "
-        "templates currently available to you may not match runtime/skill_manifest.json. "
-        "Before running any adjudication: re-sync the skill copy (or, if you just edited "
-        "the skill, run `python runtime/check_skill_loaded.py --refresh`), then reload "
+        "⚠️ mini-adjudication local integrity check FAILED — installed files may not "
+        "match runtime/skill_manifest.json. This does not inspect the agent's context. "
+        "Before running any adjudication: re-sync the skill copy, or review intentional "
+        "edits before refreshing the manifest, then reload "
         "SKILL.md. Details:\n" + shown
     )
     print(json.dumps({"additionalContext": context}))

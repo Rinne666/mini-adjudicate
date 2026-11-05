@@ -5,10 +5,10 @@
 > introduced, which releases carry it, whether it is already fixed or
 > already published. Every one of those facts decides a downstream
 > field — the affected range in the advisory, the `already_fixed`
-> verdict, the CNVD 通用型 未公开 requirement, and whether the
+> verdict, applicable publication/duplicate rules, and whether the
 > maintainer has already classified this exact shape.
 
-The timeline is recorded once per holding claim, in
+The timeline is recorded for each holding claim with decided acceptance, in
 `acceptance.oss_verification.commit_timeline`, and every field is
 either a cited fact or an explicit `untraced — <reason>`. A guessed
 timeline is worse than none: the affected range in a published advisory
@@ -23,7 +23,7 @@ is what vendors build their patches against.
 | **Introducing commit** | The affected range start; whether the defect predates a rewrite or fork | Advisory "Affected versions"; CNVD affected-product versioning |
 | **First release containing it** | The advisory's version floor — the earliest version a user can be running | `git tag --contains` |
 | **Fix commit / fix state** | Whether the verdict is `already_fixed`; the "Patched version" field | `already_fixed` verdict; advisory patched-version field |
-| **Published advisory covering it** | Whether re-reporting would be a duplicate | `already_fixed` verdict even when the code still carries the bug; CNVD 通用型 未公开 bar |
+| **Published advisory covering it** | Whether the claim duplicates a known issue and which program rules apply | `published_as`; target-fit reasoning. Publication alone does not mean fixed. |
 
 ## 2. Tracing the introducing commit
 
@@ -41,15 +41,16 @@ not the commit that last touched the line.
   was renamed.
 
 **When the trace fails**, record `untraced — <what you tried>`. The
-advisory then states "every build that contains this function" as the
-affected range. Never convert an untraced introduction into a guessed
+advisory names the verified revision and describes the defective
+implementation; the wider affected range remains untraced. Never convert an untraced introduction into a guessed
 version number — an unverified range invites the maintainer to find a
 boundary you did not intend.
 
 ## 3. Tracing the releases that carry it
 
-- `git tag --contains <introducing-commit>` — every tagged release
-  that contains the defect; the oldest is the version floor.
+- `git tag --contains <introducing-commit>` — candidate tags containing
+  the introducing commit. Check release status, later fixes, and each
+  supported branch before calling a tag affected.
 - `git log <tag>..<introducing-commit>` is empty when the tag contains
   the commit (spell it as `git merge-base --is-ancestor <commit>
   <tag>` for a single check).
@@ -64,9 +65,9 @@ boundary you did not intend.
   field is "unreleased on `main`, commit `<sha>`", never a guessed
   next version number.
 - The bug is still present and a public issue/advisory already covers
-  it → the claim is still `already_fixed` in spirit: **check before
-  writing**, because re-reporting a published advisory is the fastest
-  way to lose credibility, and it is trivially avoidable.
+  it → record both the live defect and publication status. Do not use
+  `already_fixed` without a fix. Explain duplicate/originality limitations
+  against the specific target's current policy.
 
 ## 5. Checking whether it is already published
 
@@ -84,14 +85,16 @@ Search, in this order, and record what was searched:
    commit history of past security fixes shows both prior
    classifications and whether this defect was among them.
 
-A defect that is already published is not submittable anywhere as an
-original: CNVD 通用型 requires 未公开, every CNA treats it as a
-duplicate, and every bounty program closes it.
+Publication can change originality, duplicate handling, and identifier
+assignment. Check the applicable target's current rules and whether an
+existing identifier covers this exact defect. Do not infer a universal
+rejection rule from publication alone.
 
 ## 6. The timeline table
 
-One row per holding claim, kept in the notes file under OSS
-Verification:
+The rendered OSS Verification section reflects the JSON timeline. A
+handwritten investigation note may show its uncertainty as follows
+(illustrative values, not actual evidence):
 
 ```text
 | Claim | Introduced | First release with it | Fix state | Published as | Confidence |

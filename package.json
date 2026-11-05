@@ -13,7 +13,8 @@
     "references",
     "templates",
     "schemas",
-    "runtime",
+    "runtime/*.py",
+    "runtime/*.json",
     "fixtures",
     "_meta.json"
   ],
@@ -36,10 +37,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Rinne666/mini-audit-skill.git"
+    "url": "git+https://github.com/Rinne666/mini-adjudication.git"
   },
   "scripts": {
-    "test": "python runtime/regression.py",
+    "test": "node bin/test.js",
+    "test:cli": "node --test tests/cli.test.js",
+    "test:package": "node tests/smoke-package.js",
+    "prepack": "node bin/cli.js run check_skill_loaded.py",
     "doctor": "node bin/cli.js doctor"
   }
 }

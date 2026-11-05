@@ -3,11 +3,10 @@
 > Load this when testing assertions and trying to refute them, and when
 > deciding between `holds` and `needs_more_evidence`.
 
-The goal of this stage is to **kill the claim**. A claim survives because
-you failed to kill it, not because you confirmed it. Every verdict of
-`holds` is a verdict of "I tried the obvious refutations and they did
-not work" — which is a weaker statement than it looks, and the record
-must show the attempts.
+Actively try to refute each claim while establishing the positive case.
+Failure to find a refutation is not proof: `holds` requires confirmed
+defect, reachability, and consequence assertions, supported by source
+reads, with the relevant refutation attempts recorded.
 
 ---
 
@@ -78,10 +77,9 @@ The claim may describe an older revision. Compare the cited
 - Fixed → `already_fixed`, cite the fix.
 
 **Check the published advisories too.** If the project already shipped
-this issue, the claim is `already_fixed` even though the reporter never
-knew. Re-reporting a published advisory is the fastest way to lose
-credibility with a maintainer, and it costs one page of reading to
-avoid.
+a fix, establish whether it covers the adjudicated revision and path
+before using `already_fixed`. Publication alone does not prove the current
+claim is fixed. Record duplicates and affected older releases explicitly.
 
 ### The effect is self-inflicted or same-principal
 
@@ -117,14 +115,15 @@ Use `runtime/evidence_log.py` so the searches are captured with their
 exit code and output size:
 
 ```text
-python runtime/evidence_log.py search \
+python3 runtime/evidence_log.py search \
   --ledger adjudication/evidence.jsonl --artifact-dir adjudication/evidence \
   --pattern 'requireAdmin|assertAdmin|isAdmin' --glob '*.go' internal/httpd/
 ```
 
-Two different patterns over the same surface, both empty, is a
-defensible absence claim. Record both evidence IDs in the assertion's
-`absence_searches`.
+Two different patterns over the relevant surface are a minimum capture
+requirement, not a proof of semantic coverage. Explain why the chosen
+paths, globs, and naming alternatives address the proposed control, and
+read the relevant flow. Record both IDs in `absence_searches`.
 
 **When a grep returns empty, suspect the pattern before concluding
 absence.** Wrong glob, wrong directory, wrong case, or a different
@@ -133,11 +132,10 @@ exactly like "the guard does not exist".
 
 **The absence is re-verified before delivery.** The validator re-runs
 every recorded zero-match search against the source it names, and
-rejects a ledger entry whose "no matches" no longer reproduces. This is
-not paranoia: a ledger that merely asserts an absence is worth exactly
-as much as the assertion, which is to say nothing. The re-run is what
-distinguishes "the guard does not exist" from "the pattern does not
-match".
+rejects a ledger entry whose "no matches" no longer reproduces. If source
+or search tooling is unavailable, delivery is blocked until the evidence
+can be checked. Replay establishes reproducibility of the query, not that
+the query was well chosen or that the guard cannot exist under another name.
 
 ---
 
@@ -164,13 +162,15 @@ validity verdict is derived from the assertion verdicts, not chosen:
 | any refuted | `does_not_hold` |
 | any fixed | `already_fixed` |
 | an unresolved defect, reachability or consequence | `needs_more_evidence` |
-| otherwise | `holds` |
+| defect, reachability, and consequence confirmed, with no refuted/fixed assertion or unresolved technical assertion | `holds` |
 
 An unresolved **precondition** is the one that does not block. It says
 how often the trigger fires, not whether the defect is there — a product
 mis-handles an empty answer shape whether or not the extension produces
 it every day. That uncertainty belongs to Q1 in the Assess stage, where
-it decides whether the maintainer will accept the report.
+it informs the acceptance assessment. If the actor controlling the
+condition cannot be established, record `unknown` premise and `pending`
+acceptance with blocking facts; do not assume acceptance.
 
 An unresolved **consequence** does block. The consequence is what the
 report would assert about harm; if it cannot be established, the claim
@@ -181,11 +181,13 @@ until that value is observed — and then becomes `holds` or
 
 So when a claim turns out to depend on something outside the source,
 decompose it so the dependency lands on the assertion that deserves it.
-Moving an uncertainty from the consequence to the precondition changes
-the verdict. That is the decision, and it has to be made on purpose.
+Moving an uncertainty from consequence to precondition changes the
+verdict, so the classification must follow the causal role of the fact,
+not the desired outcome. Missing technical assertion types cannot be
+replaced with a confirmed precondition.
 
-For these, the verdict is `needs_more_evidence`, and the record must
-name:
+For unresolved technical facts, validity is `needs_more_evidence`; for
+an unknown premise alone, acceptance is `pending`. In either case, name:
 
 1. **The exact fact** that is missing — not "more testing needed", but
    "whether the database was unreachable during the request window".
@@ -220,8 +222,8 @@ Example entry:
 
 > *Searched for a second administrator check on the setup path* — two
 > patterns over `internal/httpd/`, both zero-match (E000010, E000011).
-> The absence is real for this surface; the setup path has no other
-> administrator check.
+> The queries found no named guard on this surface; the captured path
+> read separately supports that no equivalent check runs before the write.
 
 That is checkable. "Looked for guards, didn't find any" is not.
 

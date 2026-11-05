@@ -108,7 +108,7 @@ value unset the limiter permits every attempt (`app.php:227`):
 > ```
 > — `app.php:227-230`
 
-Two searches for a limit the source supplies itself — a hardcoded
+Two searches limited to app.php for a limit the source supplies itself — a hardcoded
 numeric value, and a rate constant — were both zero-match. The value
 can only arrive from the deployment, so whether the login path is rate
 limited is a fact about the deployment, not about this code.
@@ -117,7 +117,7 @@ limited is a fact about the deployment, not about this code.
 
 | Attempt | Result |
 |---|---|
-| Looked for a limit value the source supplies itself, which would have settled the claim | Neither a hardcoded numeric limit nor a rate constant exists anywhere in the source; the value can only arrive from the environment |
+| Looked for a limit value the source supplies itself, which would have settled the claim | Neither searched numeric-limit pattern nor rate constant occurs in app.php; the effective deployment value is still read from the environment |
 
 ## What is missing
 

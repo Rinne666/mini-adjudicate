@@ -27,10 +27,11 @@ That sentence contains at least four claims:
 A1 and A2 and A3 can each be verified from source. A4 cannot — it
 depends on the database being unreachable, which is a deployment fact.
 
-So the honest verdict for this report is **`needs_more_evidence`** on A4,
-not "the vulnerability is real" and not "it is not a vulnerability". The
-decomposition is what reveals that the report is not a single claim at
-all, and therefore that it cannot get a single verdict.
+A4 is therefore `unresolved` at assertion level. If A1–A3 are confirmed
+and no assertion is refuted or fixed, the conditional claim can have
+validity `holds`. Assess must still determine who can cause A4; if that
+is unknown, acceptance is `pending` with specific blocking facts. The
+claim receives one derived validity verdict, not four competing verdicts.
 
 Without decomposition, the reporter either asserts all four (and is
 wrong about A4) or dismisses all four (and throws away a real defect in
@@ -91,8 +92,10 @@ configured an external auth hook".
 Test it by finding the condition in the code. **This is the assertion
 that most often cannot be settled from source**, because it frequently
 depends on a deployment, a configuration, or a runtime fact. When it
-cannot be settled, the claim's validity is `needs_more_evidence` — and
-that is a legitimate, valuable answer.
+cannot be settled, record the assertion as `unresolved`. This alone does
+not block validity. It may require `unknown` premise and `pending`
+acceptance. A fact needed to establish the actual path or harm belongs
+in reachability or consequence, whose uncertainty does block validity.
 
 ---
 

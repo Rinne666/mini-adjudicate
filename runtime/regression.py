@@ -118,6 +118,14 @@ def main(argv: list[str] | None = None) -> int:
     print("-- test_phase_and_gate")
     print("   OK")
 
+    for test_name in ("test_workspace.py", "test_evidence_log.py", "test_integrity.py"):
+        code, out = _run([PY, str(RUNTIME / test_name)])
+        if code != 0:
+            print(f"FAIL: {test_name} exit {code}: {out}", file=sys.stderr)
+            return 1
+        print(f"-- {test_name}")
+        print("   OK")
+
     # The CVSS cross-check is part of the framework's guarantees.
     code, out = _run([PY, str(RUNTIME / "cvss31.py"), "--selftest"])
     if code != 0:

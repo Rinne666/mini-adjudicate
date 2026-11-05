@@ -3,9 +3,9 @@
 > The report draft, for a claim whose validity is `holds` and whose
 > acceptability is `accept` or `accept_after_rewrite`.
 >
-> For a claim that does **not** hold, do not use this template. Use
-> `templates/refutation.md` instead — a report for a claim that was
-> refuted is worse than no report.
+> For a claim that does not hold, or whose acceptance is `pending`,
+> use `templates/refutation.md` instead. Prepare every reportable draft
+> in the batch without waiting for a response to another draft.
 
 ## Title
 
@@ -16,9 +16,9 @@ consequence the attacker obtains.
 > Strong: "The provider layer permits a second administrator to be
 > created; there is no first-admin-only constraint"
 
-A consequence subject turns the report into a deployment argument. An
-invariant subject keeps the code as the object of the claim, and
-survives even when the maintainer disagrees about reachability.
+The title identifies the failed invariant; the impact section establishes
+the attacker capability. Neither wording nor a same-version comparison
+replaces proof of reachability and consequence.
 
 ## Affected component
 
@@ -64,16 +64,16 @@ either.
 
 ## Same-version behaviour divergence
 
-The paragraph that carries the report. State both sides symmetrically:
+When a divergence supports the report, state both sides symmetrically:
 
 > `<path A>` refuses the operation when `<condition>` holds
 > (`file:line`).
 > `<path B>` performs the operation under the same condition
 > (`file:line`).
 
-This is checkable in under a minute and cannot be dismissed by an
-argument about intent. If there is no divergence, delete this section
-and make sure the invariant argument stands on its own.
+Explain why the two paths should enforce the same invariant. If there
+is no divergence, delete this section and support the boundary argument
+with other evidence.
 
 ## Attack path
 
@@ -83,8 +83,8 @@ the consequence — what the attacker now controls.
 
 ## Impact
 
-What the attacker gained, concretely. Not "could lead to" — what
-demonstrably happened.
+What the evidence demonstrates the attacker can gain. Distinguish
+observed reproduction from a complete static proof and proposed tests.
 
 Use only data the reporter created. If real user data was reachable,
 state "confirmed reachable, contents not retrieved" and move on. Never
@@ -104,7 +104,8 @@ export real user data.
 `{critical | high | medium | low}` with a one-line justification
 grounded in the consequence, not in the difficulty of exploitation.
 
-**CVSS v3.1**: `CVSS:3.1/...` → **`{score}` ({rating}`)**.
+**CVSS v3.1**: `CVSS:3.1/...` → **{score} ({rating})**.
+Use the target's requested scheme if different and identify it explicitly.
 
 Justify each non-obvious metric choice in one clause — `AC:H` because
 …, `A:N` because … — and score against the conditions that actually
@@ -115,9 +116,8 @@ reasoning, not just the number.
 
 - **Version tested**: `{commit / tag}`.
 - **Affected range**: `{range}` — or, when the introducing commit
-  cannot be traced, "every build that contains this function". Never
-  invent a version boundary; an unverified range invites the
-  maintainer to find a boundary you did not intend.
+  cannot be traced, "verified at {revision}; wider range untraced".
+  Describe the defective implementation without inventing version bounds.
 - **Patched version**: `{released version}` — or, when the fix is
   unreleased, "unreleased on `main`, commit `<sha>`". Never guess the
   next version number.
@@ -138,7 +138,8 @@ that does not sanitize, an allowlist that allows the bypass).
 
 Not part of the report body. Record here:
 
-- Channel and why.
+- Proposed channel, policy source, and why it fits; distinguish policy
+  from the built-in acceptance heuristic.
 - Credit / attribution decision.
 - AI-assistance disclosure state.
 - Anything the submitter must decide before the submit action.

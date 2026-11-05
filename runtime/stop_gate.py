@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """stop_gate -- the Stop-event hard gate for the mini-adjudication skill.
 
-Installed as a ZCode `Stop` hook, this is the enforcement layer the
-skill's prose always assumed but never had: the model may not end a
-turn on an adjudication state that is inconsistent with what it claims.
+When explicitly configured as a compatible harness `Stop` hook, this
+checks the recorded adjudication state at turn end. The npm installer
+does not register it. The explicit deliver validator remains authoritative.
 
 What it does, in order:
 
   1. Find the adjudication notes file (`adjudication*.md`) in the
      project. No notes file means no adjudication is active in this
      session's project — exit 0 silently, immediately.
-  2. Check skill freshness (check_skill_loaded). A stale skill means
-     the model is reasoning over instructions that no longer match this
-     framework — block once, loudly.
+  2. Check local payload integrity (check_skill_loaded). A mismatch
+     means local files no longer match their manifest, not that the
+     model's context has been inspected.
   3. Run validate_partial: everything recorded must be valid (derived
      verdicts, cited evidence that exists, acceptance/submission blocks
      that exist must be complete and consistent). Completeness below
@@ -180,10 +180,8 @@ def main() -> int:
             pass
         return 0
 
-    # Freshness: a stale skill means the instructions in context do not
-    # match this framework. Say so once, loudly, then fail open. The
-    # check's stdout is swallowed — hook stdout must be the decision JSON
-    # and nothing else.
+    # Hook stdout must contain only the decision JSON. File integrity
+    # cannot establish which skill version an agent actually read.
     freshness_errors: list[str] = []
     try:
         import contextlib
@@ -192,11 +190,10 @@ def main() -> int:
         with contextlib.redirect_stdout(io.StringIO()):
             if check_skill_loaded.check() != 0:
                 freshness_errors.append(
-                    "mini-adjudication skill files do not match runtime/skill_manifest.json — the skill "
-                    "instructions in context are stale. Re-sync the skill (and re-run "
-                    "check_skill_loaded.py --refresh after editing it), then reload SKILL.md."
+                    "mini-adjudication files do not match runtime/skill_manifest.json. Re-sync the skill "
+                    "or review intentional edits before refreshing the manifest, then reload SKILL.md."
                 )
-    except Exception as exc:  # noqa: BLE001 - a broken check must not wedge the gate
+    except (Exception, SystemExit) as exc:  # a broken check must not wedge the gate
         freshness_errors.append(f"check_skill_loaded raised {exc!r}")
 
     ledger = _find_ledger(notes)
@@ -233,7 +230,7 @@ def main() -> int:
         reason_lines.append(f"- {err}")
     reason_lines.append(
         "Fix the notes file, then re-run the driver and follow its NEXT instruction until READY:\n"
-        f"  python \"{RUNTIME_DIR / 'validate_adjudication.py'}\" \"{notes}\""
+        f"  \"{sys.executable}\" \"{RUNTIME_DIR / 'validate_adjudication.py'}\" \"{notes}\""
         + (f" --evidence-ledger \"{ledger}\"" if ledger is not None else "")
         + " --next"
     )

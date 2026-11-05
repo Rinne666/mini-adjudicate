@@ -24,12 +24,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 MAX_ARTIFACT_BYTES = 1_000_000
@@ -72,26 +74,59 @@ def _relative_path(path: str, base: Path) -> str:
     """Return a path relative to base, including for absolute input paths."""
     if path == "-":
         return path
-    return os.path.relpath(Path(path).resolve(), base.resolve())
+    return Path(os.path.relpath(Path(path).resolve(), base.resolve())).as_posix()
+
+
+@contextlib.contextmanager
+def _ledger_lock(ledger: Path):
+    """Serialize ID allocation and writes across processes on every platform."""
+    lock = ledger.with_name(ledger.name + ".lock")
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            lock.mkdir()
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise ValueError(
+                    f"evidence ledger is locked: {lock}; retry after the writer finishes. "
+                    "If a writer crashed, inspect and remove its abandoned lock before retrying."
+                )
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        lock.rmdir()
 
 
 def _write_record(ledger: Path, artifact_dir: Path, record: dict, output: bytes) -> int:
-    evidence_id = record["id"]
     truncated = len(output) > MAX_ARTIFACT_BYTES
     saved = output[:MAX_ARTIFACT_BYTES]
-    artifact = artifact_dir / f"{evidence_id}.txt"
-    artifact.write_bytes(saved)
-    relative_artifact = os.path.relpath(artifact, ledger.parent)
-    record.update(
-        {
-            "artifact": relative_artifact,
-            "artifact_bytes": len(saved),
-            "artifact_sha256": hashlib.sha256(saved).hexdigest(),
-            "truncated": truncated,
-        }
-    )
-    with ledger.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(record, sort_keys=True) + "\n")
+    with _ledger_lock(ledger):
+        number = int(_next_id(ledger)[1:])
+        while True:
+            evidence_id = f"E{number:06d}"
+            artifact = artifact_dir / f"{evidence_id}.txt"
+            try:
+                with artifact.open("xb") as stream:
+                    stream.write(saved)
+                break
+            except FileExistsError:
+                # Preserve artifacts left by a writer interrupted before
+                # its ledger append, or by another evidence directory.
+                number += 1
+        relative_artifact = _relative_path(str(artifact), ledger.parent)
+        record.update(
+            {
+                "id": evidence_id,
+                "artifact": relative_artifact,
+                "artifact_bytes": len(saved),
+                "artifact_sha256": hashlib.sha256(saved).hexdigest(),
+                "truncated": truncated,
+            }
+        )
+        with ledger.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, sort_keys=True) + "\n")
     sys.stdout.buffer.write(saved)
     if truncated:
         print(f"\n[output truncated at {MAX_ARTIFACT_BYTES} bytes]", file=sys.stderr)
@@ -101,7 +136,6 @@ def _write_record(ledger: Path, artifact_dir: Path, record: dict, output: bytes)
 
 def _run_search(args: argparse.Namespace) -> int:
     ledger, artifact_dir = _prepare_paths(args.ledger, args.artifact_dir)
-    evidence_id = _next_id(ledger)
     command = ["rg", "--line-number", "--with-filename", "--no-heading", "--color", "never", "--max-count", str(MAX_SEARCH_RESULTS_PER_FILE)]
     for glob in args.glob:
         command.extend(["--glob", glob])
@@ -131,9 +165,8 @@ def _run_search(args: argparse.Namespace) -> int:
         ledger,
         artifact_dir,
         {
-            "id": evidence_id,
             "kind": "search",
-            "cwd": os.path.relpath(Path.cwd(), ledger.parent),
+            "cwd": _relative_path(str(Path.cwd()), ledger.parent),
             "query": args.pattern,
             "paths": logged_paths,
             "globs": args.glob,
@@ -154,14 +187,17 @@ def _run_read(args: argparse.Namespace) -> int:
         print(f"read line range must be 1-{MAX_READ_LINES} lines, inclusive", file=sys.stderr)
         return 2
     ledger, artifact_dir = _prepare_paths(args.ledger, args.artifact_dir)
-    evidence_id = _next_id(ledger)
     path = Path(args.path).resolve()
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        source_bytes = path.read_bytes()
+        lines = source_bytes.decode("utf-8", errors="replace").splitlines()
     except OSError as exc:
         print(f"cannot read {path}: {exc}", file=sys.stderr)
         return 2
     selected = lines[args.start - 1 : args.end]
+    if not selected:
+        print(f"read starts past the end of {path}; no source evidence captured", file=sys.stderr)
+        return 2
     output = "".join(
         f"{index}: {line}\n" if line else f"{index}:\n"
         for index, line in enumerate(selected, args.start)
@@ -170,10 +206,10 @@ def _run_read(args: argparse.Namespace) -> int:
         ledger,
         artifact_dir,
         {
-            "id": evidence_id,
             "kind": "read",
-            "cwd": os.path.relpath(Path.cwd(), ledger.parent),
-            "path": os.path.relpath(path, Path.cwd()),
+            "cwd": _relative_path(str(Path.cwd()), ledger.parent),
+            "path": _relative_path(str(path), Path.cwd()),
+            "source_sha256": hashlib.sha256(source_bytes).hexdigest(),
             "start_line": args.start,
             "end_line": min(args.end, len(lines)),
             "result_summary": f"read {len(selected)} line(s)",

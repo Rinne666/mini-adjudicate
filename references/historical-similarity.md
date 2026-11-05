@@ -2,10 +2,9 @@
 
 > Load this during the Assess stage, every time Q2 (boundary) is
 > answered for an open-source target. The project's own history with
-> near-identical issues is the strongest acceptance evidence available —
-> a similar shape that was released as *Hardening* rather than *Security
-> fix* means the answer to this claim is already written, and a report
-> that ignores it walks into a pre-decided closure.
+> near-identical issues helps interpret its policy. Compare the premise,
+> boundary, version, and consequence before drawing an inference; historical
+> classifications do not determine every later claim.
 
 Two questions are answered here, both recorded in
 `acceptance.oss_verification`:
@@ -35,8 +34,8 @@ Search in decreasing order of authority:
    projects count as evidence too, weighted lower.
 4. **The issue tracker** — closed issues with the maintainer's own
    closure reasons. A closure reason is the maintainer's acceptance
-   model stated out loud (see `references/ordering-and-channels.md` §4
-   for turning a closure into a rule).
+   decision in a specific context (see
+   [reassessment after feedback](ordering-and-channels.md#reassess-after-feedback)).
 
 Each similar issue is recorded as a reference (GHSA id, CVE id, commit
 sha, issue number) plus its classification. "None found" is a valid
@@ -46,20 +45,17 @@ repo query + NVD keyword + git log -p of the sink", classification:
 
 ## 2. The classification labels
 
-| Label | What it predicts for this claim |
+| Label | What to compare for this claim |
 |---|---|
 | `security_fix` | The same shape was accepted as a vulnerability. Strong accept signal; cite it in the advisory's favour. |
-| `hardening` | The same shape was accepted only as an improvement. Expect `decline` on the report, offer the patch. |
+| `hardening` | The earlier case was treated as an improvement; inspect the reason and whether this claim crosses a different boundary. |
 | `bug_fix` | The shape was fixed without security framing. The report must argue the boundary crossing explicitly, or expect the same framing. |
-| `wontfix` | The maintainer already ruled this shape out of scope. Do not submit the same shape without a new divergence. |
+| `wontfix` | Read the actual closure reason and whether it still applies; do not equate every wontfix with a scope decision. |
 | `unknown` | Nothing similar found (with the searches recorded). The claim rests on its own evidence. |
 
-The fixture's SECURITY.md states the doctrine most projects follow
-without writing it down: **a declared invariant that the code violates
-on one path is a security fix; a missing control the product never
-claimed to have is hardening.** When the project's history shows both
-labels in use, this distinction — not severity — decides which one this
-claim gets.
+The fixture's SECURITY.md defines a policy for that fixture only. Do not
+transfer it to another project. Use a comparison to explain the boundary
+argument, and record any mismatch with the target's current policy.
 
 ## 3. Reading maintainer preference
 
@@ -67,17 +63,16 @@ Preference is a pattern, not a vibe. Cite the instances:
 
 - **Labelling pattern** — how the project's fix commits and advisories
   split between `security_fix` / `hardening` / `bug_fix` (from §1's
-  searches). One data point is an anecdote; three is a pattern.
+  searches). State the sample and its limitations rather than treating a fixed count as proof.
 - **Credit behaviour** — do published advisories credit external
   reporters? A project that never credits still accepts reports; a
   project that credits actively is likelier to engage with them.
-- **Publication cadence** — regular advisories mean a live disclosure
-  process and a working CVE path (through their CNA or GitHub); the
-  last advisory years old means the report may sit.
+- **Publication cadence** — record observed dates. A sparse public record
+  does not prove that private intake is inactive or that no CNA route exists.
 - **Argument style** — from closed issues: does the maintainer argue
   reachability (then lead with the divergence), intent (then lead with
   the declared boundary), or deployment (then the premise must be
-  attacker_only or the report is hardening)?
+  explicit about its configuration and policy fit)?
 
 ## 4. Developer awareness — did they already know?
 
@@ -93,16 +88,16 @@ noticed the risk:
 
 Record `developer_awareness` per reportable claim:
 
-- `aware` (with the comment/issue cited) — the report must address
-  *why the acknowledgement never became a fix*, or it will be closed
-  as "known issue / wontfix";
-- `false` (searched, nothing) — normal case, say so;
+- `aware` (with the comment/issue cited) — distinguish an acknowledged
+  residual defect from a fixed or intentionally accepted behavior;
+- `false` (searched, nothing) — no awareness evidence found in the stated
+  search scope; this does not prove what the developers privately knew;
 - `unknown` — the history is unavailable, with what was tried.
 
 An `aware` finding is not a reason to stay silent — a TODO is not a
 fix, and the invariant is still violated — but it changes the report's
 framing from "you have a bug" to "the check you started is missing on
-this path", which is the framing that survives.
+this path", while preserving the actual observed impact and unresolved assumptions.
 
 ## 5. Writing it down
 

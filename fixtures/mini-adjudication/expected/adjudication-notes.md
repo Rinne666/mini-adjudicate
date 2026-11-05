@@ -1,7 +1,8 @@
 # Adjudication Notes — mini-adjudication
 
 > Fixture: the expected output of a correct adjudication for
-> `fixtures/mini-adjudication/app.php`.
+> `fixtures/mini-adjudication/app.php` and its default composition in
+> `fixtures/mini-adjudication/default_auth.php`.
 >
 > It covers four claim shapes that produce four different verdicts:
 > one that holds and would be accepted, one that does not hold, one
@@ -29,7 +30,9 @@ any of them is written up.
 - **Target**: the fixture service.
 - **Target kind**: `open_source` — the service ships as source with a
   repository, so the OSS Verification section applies.
-- **Source ref adjudicated**: the fixture at its current revision.
+- **Source ref adjudicated**: `app.php` and `default_auth.php` at the current
+  fixture revision, reviewed from source only. E000012 captures and hashes
+  the default adapter and its assembly; no PHP was executed.
 - **Upstream acceptance policy**: `fixtures/mini-adjudication/SECURITY.md`.
   **Source of authority**: `stated`.
 - **Published advisories already checked**: yes — two prior advisories
@@ -50,7 +53,7 @@ to test.
 | A1 | The login path writes the presented password's hash over the stored credential when the extension answers empty | `defect` | `fixtures/mini-adjudication/app.php:116` | |
 | A2 | An unauthenticated client reaches the login path | `reachability` | `fixtures/mini-adjudication/app.php:99` | The login entry takes a username and a password and nothing else |
 | A3 | The client is then authenticated as that account | `consequence` | `fixtures/mini-adjudication/app.php:117` | The branch returns true immediately after the write |
-| A4 | The configured extension answers with an empty body | `precondition` | the configured extension's own response behaviour — not present in this source | Not settleable from this source |
+| A4 | The default adapter returns empty for every login and is wired into AuthService | `precondition` | `fixtures/mini-adjudication/default_auth.php:13-33` | Deterministic default behaviour, captured in E000012 |
 
 ### Claim 2 — share token not checked
 
@@ -81,7 +84,7 @@ to test.
 | 1 | A1 | `confirmed` | Read the empty-answer branch and looked for a check between the empty test and the write | The write is unconditional; no check intervenes | E000001 |
 | 1 | A2 | `confirmed` | Looked for authentication in front of the login entry | The entry takes a username and a password only | E000001 |
 | 1 | A3 | `confirmed` | Read the branch's return path and looked for a second credential comparison | There is none; the method returns true right after the write | E000001 |
-| 1 | A4 | `unresolved` | Looked for an implementation of the extension in this source | Two distinct patterns, both zero-match; the extension's behaviour is outside this source | E000007, E000008, E000009 |
+| 1 | A4 | `confirmed` | Read the default adapter and factory for a conditional return, alternate provider, or required operator change | The adapter unconditionally returns empty, and the default factory installs it | E000012 |
 | 2 | A5 | `refuted` | Read the download path for a token comparison | The path compares the presented token against the expected one with hash_equals | E000004 |
 | 2 | A6 | `refuted` | Followed the control flow past the comparison | The comparison returns false and the method returns before the session is read | E000004 |
 | 3 | A7 | `confirmed` | Read `allow()` for a branch that denies, including one that survives a configured limit | The only denying path is the one a configured limit takes, and the zero-limit path returns true | E000005 |
@@ -93,13 +96,21 @@ to test.
 An assertion that was never refuted because no attempt was made is
 `unresolved`, not `confirmed`.
 
+**Evidence scope:** E000008–E000011 search only `app.php`. E000008 and
+E000009 establish no matching implementation in that file, not in the
+repository; `default_auth.php` contains the implementation captured by
+E000012. E000010 and E000011 likewise establish only their two pattern
+absences in `app.php`, not a deployment setting or repository-wide absence.
+E000013 captures `SECURITY.md`, including scope, channels, and the two
+fixture advisory precedents used in the OSS assessment.
+
 ## Acceptance Answers
 
 Only claim 1 holds, so it is the only claim that reaches this stage.
 
 | Claim | Q1 Premise | Q2 Boundary | Q3 Divergence | Acceptability | Rationale |
 |---|---|---|---|---|---|
-| 1 | `attacker_only` | `declared_and_violated` | `present` | `accept` | The attacker is anonymous and holds only a username. The extension answering empty is a documented answer shape, not an operator weakening, and the product's own interface says it means "no opinion" — so the login path violates a rule the product already states, while the probe and the admin plane both honour it. |
+| 1 | `attacker_only` | `declared_and_violated` | `present` | `accept` | The attacker is anonymous and holds only a username. E000012 shows that the default factory installs an adapter returning empty for every ordinary login request; this proves the trigger without guessing about an external provider. The login path violates the declared no-opinion rule while the probe and admin plane honour it. |
 
 ## OSS Verification
 
@@ -108,13 +119,13 @@ project's own record.
 
 | Claim | Policy check | Introducing commit | First release | Fix state | Published as | Similar issues | Maintainer preference |
 |---|---|---|---|---|---|---|---|
-| 1 | SECURITY.md scope covers the extension's answer shapes; the declared-invariant rule makes an empty answer treated as other than "no opinion" a security fix | untraced — the fixture ships as a single-revision sample; no introducing commit exists to trace | not released — no version tags exist for the fixture | none — the write at `app.php:116` still happens on the empty answer | none found — the policy's advisory table lists ADV-0001 and ADV-0002; neither covers the login path | ADV-0001 → `security_fix` (same empty-answer shape, admin plane) · ADV-0002 → `hardening` (setup window) | Classified by the declared-invariant rule, not severity; both advisories came through the private advisory flow with published credit |
+| 1 | E000013 captures SECURITY.md; its scope covers the extension's answer shapes; the declared-invariant rule makes an empty answer treated as other than "no opinion" a security fix | untraced — the fixture ships as a single-revision sample; no introducing commit exists to trace | not released — no version tags exist for the fixture | none — the write at `app.php:116` still happens on the empty answer | none found — the policy's advisory table lists ADV-0001 and ADV-0002; neither covers the login path | ADV-0001 → `security_fix` (same empty-answer shape, admin plane) · ADV-0002 → `hardening` (setup window) | Classified by the declared-invariant rule, not severity; both advisories came through the private advisory flow with published credit |
 
 ## Verdict Table
 
 | # | Claim | Validity | Acceptability | Subject (the invariant) | Action | Evidence IDs |
 |---|---|---|---|---|---|---|
-| 1 | empty external-auth response | `holds` | `accept` | An empty external-authentication response must fail authentication closed; it must never cause the stored credential to be derived from the credential presented by an unauthenticated client. | `report` | E000001, E000002, E000003, E000007 |
+| 1 | empty external-auth response | `holds` | `accept` | An empty external-authentication response must fail authentication closed; it must never cause the stored credential to be derived from the credential presented by an unauthenticated client. | `report` | E000001, E000002, E000003, E000007, E000012, E000013 |
 | 2 | share token not checked | `does_not_hold` | — | — | `no_report` | E000004 |
 | 3 | login path not rate limited | `needs_more_evidence` | — | — | `needs_evidence` | E000001, E000005, E000010, E000011 |
 | 4 | session survives rotation | `already_fixed` | — | — | `already_fixed` | E000006 |
@@ -130,14 +141,14 @@ ranks by harm, the sends still go by reception.
 
 | Order | Claim | Severity | Core business | Developer aware | Special config | Boundary crossed | Primary target | Secondary / unsuitable |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 1 | `high` — any named account's stored credential can be rewritten and then authenticated as, by an anonymous client | yes — SECURITY.md scope names the authentication paths and the extension's answer shapes | false — no comment, TODO, or partial guard on the login path (E000001); the sibling paths guard the same answer without marking this one known-risk | not required — an extension answering empty is documented normal operation (app.php:77-83), not a weakened configuration | from an unauthenticated network client holding only a username, to rewriting the stored credential of any named account and authenticating as it | `vendor_advisory` — the policy names the private advisory flow and every published advisory used it | `cve_cna` secondary — via the maintainer's published advisory · `cnvd` unsuitable — not a distributed product with internet instances · `src_platform` unsuitable — not a vendor asset |
+| 1 | 1 | `critical` (CVSS 3.1: 9.1) — any named account's stored credential can be rewritten and then authenticated as, by an anonymous client | yes — SECURITY.md scope names the authentication paths and the extension's answer shapes | aware — the fixture explicitly marks the defect at app.php:113-115 (E000001); this is a teaching annotation | not required — the default adapter always returns empty and is installed by the default factory (default_auth.php:13-33, E000012) | from an unauthenticated network client holding only a username, to rewriting the stored credential of any named account and authenticating as it | `vendor_advisory` — the policy names the private advisory flow and every published advisory used it | `cve_cna` secondary — via the maintainer's published advisory · `cnvd` unsuitable — not a distributed product with internet instances · `src_platform` unsuitable — not a vendor asset |
 
 ## Work Queue
 
 | id | category | task | priority | reason | budget_unit | stop_condition | status | outcome | evidence_ids |
 |---|---|---|---|---|---|---|---|---|---|
-| W1 | validity | Decompose and test every claim's assertions | high | A claim that cannot be decomposed cannot be judged | one read per assertion | Every assertion has a verdict with evidence | completed | Four claims adjudicated; one holds, one is refuted, one needs evidence, one is fixed | E000001, E000004, E000005, E000006 |
-| W2 | acceptance | Read the policy and answer the three questions for holding claims | high | A verdict against the wrong acceptance model is worse than no verdict | one policy read plus three reads | The holding claim has all three answers | completed | Claim 1 is attacker_only, boundary violated, divergence present | E000002, E000003, E000007 |
+| W1 | validity | Decompose and test every claim's assertions | high | A claim that cannot be decomposed cannot be judged | one read per assertion | Every assertion has a verdict with evidence | completed | Four claims adjudicated; one holds, one is refuted, one needs evidence, one is fixed | E000001, E000004, E000005, E000006, E000012 |
+| W2 | acceptance | Read the policy and answer the three questions for holding claims | high | A verdict against the wrong acceptance model is worse than no verdict | one policy read plus three reads | The holding claim has all three answers | completed | Claim 1 is attacker_only, boundary violated, divergence present | E000002, E000003, E000007, E000012, E000013 |
 | W3 | artifact | Produce the artifact each verdict calls for | medium | The artifact must match the verdict, not the claim's tone | one artifact per claim | Every claim has its artifact | completed | One advisory, three written findings | E000001, E000004, E000005, E000006 |
 | W4 | ordering | Choose the delivery order and the channel | medium | The first report sets the credibility for the rest | one pass over the reportable set | One channel and a per-position reason | completed | One reportable claim; the private advisory flow is the channel the project uses | E000001 |
 | W5 | final_review | Challenge the does_not_hold and needs_more_evidence verdicts | medium | A downgrade must be as evidenced as an upgrade | one independent pass per negative verdict | Each negative verdict is confirmed against its evidence | completed | Confirmed: the share path compares the token, and the rate limit is a deployment value this source cannot settle | E000004, E000005, E000010, E000011 |
@@ -149,15 +160,17 @@ ranks by harm, the sends still go by reception.
 | 1 | Looked for a check between the empty test and the write that rejects the presented password | The branch writes and returns unconditionally; there is no intervening check |
 | 1 | Looked for a second guard on the login path that rejects an empty extension answer | Two sibling paths have exactly that guard, which is why their presence is the divergence rather than a refutation of this claim |
 | 2 | Looked for a token comparison elsewhere in the path that might make the in-path check redundant | The check is in the path, and it is the only one; the claim named no line, so the question was whether the guard existed at all, and it does |
-| 3 | Looked for a limit value that the source supplies itself, which would have settled the claim | Neither a hardcoded numeric limit nor a rate constant exists anywhere in the source; the value can only arrive from the environment |
+| 3 | Looked for a limit value that the source supplies itself, which would have settled the claim | Neither searched numeric-limit pattern nor rate constant occurs in app.php; the effective deployment value is still read from the environment |
 
 ## Remaining Questions
 
-Whether the configured extension in the real deployment ever answers
-with an empty body, and if so how often. This does not change claim 1's
-verdict — the defect is that the product mishandles that answer shape —
-but it changes the practical urgency, and the report states it as a
-precondition rather than a certainty.
+Claim 1 has no unresolved trigger in the default fixture: E000012 shows
+the adapter returning empty on every request and its default wiring.
+Whether a different deployment substitutes another provider is outside
+this example; without evidence of that provider's behaviour, its premise
+must be `unknown` and acceptance `pending`, not copied from this verdict.
+Claim 3 remains blocked on the environment value of the deployment being
+reported; knowing the no-override default does not reveal a live setting.
 
 ---
 
@@ -179,7 +192,7 @@ precondition rather than a certainty.
       "id": "C1",
       "claim": "An empty external-auth response rewrites the stored password, so any password authenticates",
       "claim_source": "our own reading",
-      "source_ref": "fixture at current revision",
+      "source_ref": "app.php and default_auth.php at current fixture revision (source-only review; E000012 pins the default adapter snapshot)",
       "assertions": [
         {
           "id": "A1",
@@ -188,7 +201,9 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:116",
           "verdict": "confirmed",
           "refutation_attempted": "Read the empty-answer branch and looked for a check between the empty test and the write",
-          "evidence_ids": ["E000001"]
+          "evidence_ids": [
+            "E000001"
+          ]
         },
         {
           "id": "A2",
@@ -197,7 +212,9 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:99",
           "verdict": "confirmed",
           "refutation_attempted": "Looked for authentication in front of the login entry",
-          "evidence_ids": ["E000001"]
+          "evidence_ids": [
+            "E000001"
+          ]
         },
         {
           "id": "A3",
@@ -206,27 +223,27 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:117",
           "verdict": "confirmed",
           "refutation_attempted": "Read the branch's return path and looked for a second credential comparison",
-          "evidence_ids": ["E000001"]
+          "evidence_ids": [
+            "E000001"
+          ]
         },
         {
           "id": "A4",
           "type": "precondition",
-          "statement": "The configured extension answers with an empty body",
-          "anchor": "the configured extension's own response behaviour, which is not present in this source",
-          "verdict": "unresolved",
-          "refutation_attempted": "Looked for an implementation of the extension in this source with two distinct patterns; both were zero-match",
-          "absence_searches": [
-            {"evidence_id": "E000008"},
-            {"evidence_id": "E000009"}
-          ],
-          "evidence_ids": ["E000007", "E000008", "E000009"]
+          "statement": "The default fixture adapter returns an empty string for every ordinary login request and is wired into AuthService",
+          "anchor": "fixtures/mini-adjudication/default_auth.php:13-33",
+          "verdict": "confirmed",
+          "refutation_attempted": "Read the adapter and default factory for a conditional return, replacement provider, or required operator step; the adapter returns empty unconditionally and the factory instantiates it",
+          "evidence_ids": [
+            "E000012"
+          ]
         }
       ],
       "validity": "holds",
-      "validity_rationale": "The defect, the reachability and the consequence are all confirmed in source. The precondition is unresolved, but it is a precondition of the trigger, not of the defect: the product mishandles the empty answer shape regardless of how often the extension produces it.",
+      "validity_rationale": "The defect, reachability, and consequence are confirmed in app.php. E000012 independently confirms the trigger: the default factory supplies an adapter that returns empty on every login request. This verdict does not infer trigger control from an interface contract alone.",
       "acceptance": {
         "premise_kind": "attacker_only",
-        "premise_evidence": "fixtures/mini-adjudication/app.php:99 — the login entry takes a username and a password and nothing else",
+        "premise_evidence": "fixtures/mini-adjudication/default_auth.php:13-33 — the default adapter returns empty on every call and the factory wires it into AuthService; app.php:99 accepts an unauthenticated username/password request",
         "boundary_state": "declared_and_violated",
         "boundary_evidence": [
           "fixtures/mini-adjudication/app.php:78 — the extension's own interface says an empty string means 'no opinion'",
@@ -245,9 +262,9 @@ precondition rather than a certainty.
           }
         ],
         "acceptability": "accept",
-        "rationale": "The attacker is anonymous and holds only a username. The extension answering with an empty body is a documented answer shape rather than an operator weakening, and the product's own two sibling paths refuse it, so the intent is not in question.",
+        "rationale": "The default adapter deterministically returns empty for an ordinary login request. The default factory installs that adapter without an operator change. An anonymous caller who knows an existing username supplies only the request; source shows both the trigger and the same-version divergence. A different deployment with an uninspected provider would require a separate premise assessment.",
         "oss_verification": {
-          "policy_verified": "SECURITY.md puts the authentication paths and the extension's answer shapes in scope, and its declared-invariant rule classifies a path that treats an empty answer as other than 'no opinion' as a security fix (the ADV-0001 precedent on the admin plane).",
+          "policy_verified": "SECURITY.md puts the authentication paths and the extension's answer shapes in scope, and its declared-invariant rule classifies a path that treats an empty answer as other than 'no opinion' as a security fix (the ADV-0001 precedent on the admin plane). Captured policy source: E000013 (SECURITY.md:1-47).",
           "commit_timeline": {
             "introducing_commit": "untraced — the fixture ships as a single-revision sample; no introducing commit exists to trace",
             "released_in": "not released — the fixture is not distributed under version tags",
@@ -265,27 +282,41 @@ precondition rather than a certainty.
             }
           ],
           "maintainer_preference": "The project classifies by the declared-invariant rule rather than severity: a stated rule violated on one path is a security fix (ADV-0001), a control the product never claimed to have is hardening (ADV-0002). Both advisories came through the private advisory flow with published credit.",
-          "evidence_ids": ["E000001", "E000002", "E000003", "E000007"]
+          "evidence_ids": [
+            "E000001",
+            "E000002",
+            "E000003",
+            "E000007",
+            "E000012",
+            "E000013"
+          ]
         },
-        "evidence_ids": ["E000001", "E000002", "E000003", "E000007"]
+        "evidence_ids": [
+          "E000001",
+          "E000002",
+          "E000003",
+          "E000007",
+          "E000012",
+          "E000013"
+        ]
       },
       "subject": "An empty external-authentication response must fail authentication closed; it must never cause the stored credential to be derived from the credential presented by an unauthenticated client.",
       "action": "report",
       "artifact": "expected/advisory.md",
       "submission": {
-        "severity": "high",
+        "severity": "critical",
         "core_business": {
           "in_core": true,
           "evidence": "SECURITY.md scope names the authentication paths, including the external authentication extension's answer shapes; the login path is the service's advertised entry"
         },
         "developer_awareness": {
-          "aware": "false",
-          "evidence": "No comment, TODO, or partial guard between the empty-answer test and the write (E000001); the sibling paths guard the same answer shape without marking this one as known-risk"
+          "aware": "aware",
+          "evidence": "The fixture deliberately marks the faulty branch with a DEFECT comment at app.php:113-115 (E000001). This teaching annotation establishes awareness in the fixture; it is not evidence of a real maintainer response."
         },
         "trigger_configuration": {
           "special_config_required": false,
-          "default_configuration": "Default operation: the extension interface ships in-source and an empty answer is a documented shape (app.php:77-83), so the trigger is normal operation, not a weakened configuration",
-          "evidence": "fixtures/mini-adjudication/app.php:77-83 — the interface documents the empty string as a normal answer"
+          "default_configuration": "default_auth.php:27-33 constructs AuthService with DefaultFixtureExternalAuth; its authenticate() returns empty unconditionally at default_auth.php:17. The default limiter permits an ordinary login request when APP_RATE_LIMIT_PER_MINUTE is unset.",
+          "evidence": "fixtures/mini-adjudication/default_auth.php:13-33 (E000012) and app.php:215-231 (E000005) establish the default adapter and limiter; no special configuration is needed"
         },
         "boundary_crossed": {
           "from": "an unauthenticated network client holding only a username",
@@ -314,7 +345,14 @@ precondition rather than a certainty.
           }
         ]
       },
-      "evidence_ids": ["E000001", "E000002", "E000003", "E000007"]
+      "evidence_ids": [
+        "E000001",
+        "E000002",
+        "E000003",
+        "E000007",
+        "E000012",
+        "E000013"
+      ]
     },
     {
       "id": "C2",
@@ -329,7 +367,9 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:181",
           "verdict": "refuted",
           "refutation_attempted": "Read the download path for a token comparison",
-          "evidence_ids": ["E000004"]
+          "evidence_ids": [
+            "E000004"
+          ]
         },
         {
           "id": "A6",
@@ -338,14 +378,18 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:184",
           "verdict": "refuted",
           "refutation_attempted": "Followed the control flow past the comparison",
-          "evidence_ids": ["E000004"]
+          "evidence_ids": [
+            "E000004"
+          ]
         }
       ],
       "validity": "does_not_hold",
       "validity_rationale": "The download path compares the presented token against the expected one with hash_equals and returns before the session is read, so both the defect assertion and the reachability assertion are refuted by the same guard.",
       "action": "no_report",
       "artifact": "expected/refutation.md",
-      "evidence_ids": ["E000004"]
+      "evidence_ids": [
+        "E000004"
+      ]
     },
     {
       "id": "C3",
@@ -360,7 +404,9 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:227",
           "verdict": "confirmed",
           "refutation_attempted": "Read allow() for a branch that denies, including one that survives a configured limit",
-          "evidence_ids": ["E000005"]
+          "evidence_ids": [
+            "E000005"
+          ]
         },
         {
           "id": "A8",
@@ -370,10 +416,18 @@ precondition rather than a certainty.
           "verdict": "unresolved",
           "refutation_attempted": "Searched for a limit the source hardcodes or defines as a constant with two distinct patterns; both were zero-match",
           "absence_searches": [
-            {"evidence_id": "E000010"},
-            {"evidence_id": "E000011"}
+            {
+              "evidence_id": "E000010"
+            },
+            {
+              "evidence_id": "E000011"
+            }
           ],
-          "evidence_ids": ["E000005", "E000010", "E000011"]
+          "evidence_ids": [
+            "E000005",
+            "E000010",
+            "E000011"
+          ]
         },
         {
           "id": "A9",
@@ -382,14 +436,22 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:101",
           "verdict": "unresolved",
           "refutation_attempted": "Read the login path to confirm the limiter is consulted there, then followed the decision to the configuration value it depends on",
-          "evidence_ids": ["E000001", "E000005"]
+          "evidence_ids": [
+            "E000001",
+            "E000005"
+          ]
         }
       ],
       "validity": "needs_more_evidence",
-      "validity_rationale": "The limiter's behaviour is confirmed: with no configured limit it permits every attempt, and the login path does consult it. What this source cannot settle is the deployment value that decides whether the limit binds — the source only shows where the value is read, and neither a hardcoded limit nor a rate constant exists anywhere in it. The consequence the claim asserts is therefore not established, and an unestablished consequence does not leave the claim holding.",
+      "validity_rationale": "The limiter's behaviour is confirmed: with no configured limit it permits every attempt, and the login path does consult it. What this source cannot settle is the deployment value that decides whether the limit binds — the source only shows where the value is read, and the two searches find neither searched pattern in app.php; they do not establish a repository-wide absence. The consequence the claim asserts is therefore not established, and an unestablished consequence does not leave the claim holding.",
       "action": "needs_evidence",
       "artifact": "expected/refutation.md",
-      "evidence_ids": ["E000001", "E000005", "E000010", "E000011"]
+      "evidence_ids": [
+        "E000001",
+        "E000005",
+        "E000010",
+        "E000011"
+      ]
     },
     {
       "id": "C4",
@@ -404,7 +466,9 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:250",
           "verdict": "fixed",
           "refutation_attempted": "Compared the cited line with the current source",
-          "evidence_ids": ["E000006"]
+          "evidence_ids": [
+            "E000006"
+          ]
         },
         {
           "id": "A11",
@@ -413,14 +477,18 @@ precondition rather than a certainty.
           "anchor": "fixtures/mini-adjudication/app.php:251",
           "verdict": "fixed",
           "refutation_attempted": "Read the comparison's outcome",
-          "evidence_ids": ["E000006"]
+          "evidence_ids": [
+            "E000006"
+          ]
         }
       ],
       "validity": "already_fixed",
       "validity_rationale": "The current source compares the bound credential against the current one and returns false when they differ, so a rotated credential ends the session. The claim described the behaviour before that comparison was added.",
       "action": "already_fixed",
       "artifact": "expected/refutation.md",
-      "evidence_ids": ["E000006"]
+      "evidence_ids": [
+        "E000006"
+      ]
     }
   ],
   "work_queue": [
@@ -434,7 +502,13 @@ precondition rather than a certainty.
       "stop_condition": "Every assertion has a verdict with evidence",
       "status": "completed",
       "outcome": "Four claims adjudicated; one holds, one is refuted, one needs evidence, one is fixed",
-      "evidence_ids": ["E000001", "E000004", "E000005", "E000006"]
+      "evidence_ids": [
+        "E000001",
+        "E000004",
+        "E000005",
+        "E000006",
+        "E000012"
+      ]
     },
     {
       "id": "W2",
@@ -446,7 +520,13 @@ precondition rather than a certainty.
       "stop_condition": "The holding claim has all three answers",
       "status": "completed",
       "outcome": "Claim 1 is attacker_only, boundary violated, divergence present",
-      "evidence_ids": ["E000002", "E000003", "E000007"]
+      "evidence_ids": [
+        "E000002",
+        "E000003",
+        "E000007",
+        "E000012",
+        "E000013"
+      ]
     },
     {
       "id": "W3",
@@ -458,7 +538,12 @@ precondition rather than a certainty.
       "stop_condition": "Every claim has its artifact",
       "status": "completed",
       "outcome": "One advisory, three written findings",
-      "evidence_ids": ["E000001", "E000004", "E000005", "E000006"]
+      "evidence_ids": [
+        "E000001",
+        "E000004",
+        "E000005",
+        "E000006"
+      ]
     },
     {
       "id": "W4",
@@ -470,7 +555,9 @@ precondition rather than a certainty.
       "stop_condition": "One channel and a per-position reason",
       "status": "completed",
       "outcome": "One reportable claim; the private advisory flow is the channel the project uses",
-      "evidence_ids": ["E000001"]
+      "evidence_ids": [
+        "E000001"
+      ]
     },
     {
       "id": "W5",
@@ -482,7 +569,12 @@ precondition rather than a certainty.
       "stop_condition": "Each negative verdict is confirmed against its evidence",
       "status": "completed",
       "outcome": "Confirmed: the share path compares the token, and the rate limit is a deployment value this source cannot settle",
-      "evidence_ids": ["E000004", "E000005", "E000010", "E000011"]
+      "evidence_ids": [
+        "E000004",
+        "E000005",
+        "E000010",
+        "E000011"
+      ]
     }
   ],
   "channel": {

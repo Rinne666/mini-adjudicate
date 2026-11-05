@@ -1,119 +1,73 @@
 # Submission Summary
 
-> Load this at the Deliver stage. Every claim the adjudication will
-> send gets one `submission` block answering four questions a triager
-> asks in the first ninety seconds — is this the product's core
-> business, did the developers already know, does it need a special
-> configuration to fire, and what boundary does it cross — plus the
-> target list. Together they are the 可申报总结: the submittable list,
-> with the reason each claim is submittable and where.
+Read this at Deliver. The summary gives the submitter the reportable
+claims, their proposed targets, and all blocking facts. It does not send
+anything or certify that a target will accept a draft.
 
-The four dimensions are recorded per claim, each with cited evidence.
-Three of them are judged; one of them (`trigger_configuration`) is
-cross-checked mechanically against the premise the Assess stage already
-derived.
+## Per-claim dimensions
 
----
+Record these in each reportable claim's `submission` object:
 
-## 1. Core business — is the defect in the product's main line?
+| Dimension | Evidence to use |
+|---|---|
+| `severity` | Demonstrated harm and the scoring scheme used in the advisory |
+| `core_business` | Product description, shipped component, or documented function; explain rather than infer importance from a directory name alone |
+| `developer_awareness` | Comments, partial guards, linked issues, and inspected history |
+| `trigger_configuration` | Literal default, enabling configuration, supported status, and who controls the trigger |
+| `boundary_crossed` | From actor/capability → unauthorized actor/capability on the target's trust model |
+| `targets` | Current policy fit with one primary and reasons for alternatives |
 
-What decides it:
+Core functionality can affect impact and program assessment, but is not
+an automatic severity multiplier or guarantee of higher rewards. Record
+installation or deployment counts only when supported; do not manufacture
+a distribution argument for a registry.
 
-- **The project's own scope statement** — README's first paragraph,
-  the package description, SECURITY.md's scope section. The
-  authentication path of an auth product is core; the demo app in
-  `examples/` is not.
-- **Where the code lives** — the main module/tree vs `contrib/`,
-  `examples/`, `test/`, an optional plugin directory.
-- **Whether it ships in the default build** — default `make`/`pip
-  install`/image contents vs a compile flag or optional extra.
-- **Install base** — for libraries, the dependency graph weight; for
-  products, deployment counts where knowable (CNVD's multiple-instance
-  bar for 通用型 lives here).
+For awareness, `aware` needs a specific cited record. `false` means no
+awareness evidence was found within the stated search, not proof of the
+developers' private knowledge. Use `unknown` when the relevant history is
+unavailable. An existing TODO is not a fix; explain the remaining defect.
 
-`in_core: true` raises impact and reception weight everywhere: SRCs
-weight 核心业务 higher, CNVD 影响面 scoring counts it, and maintainers
-fix their advertised function faster than their demos. `in_core:
-false` is not a rejection — but it belongs in the report's framing,
-and the CNVD/影响面 case for it must be made honestly.
+## Configuration consistency
 
-## 2. Developer awareness — did they notice and comment?
+`special_config_required` answers whether the trigger needs enabling
+configuration beyond the stated default. `default_configuration` states
+what that default actually is, with evidence. Keep supported optional
+modes distinct from unsupported or weakened configurations.
 
-Answered from source and history (see
-`references/historical-similarity.md` §4): comments, TODO/FIXME,
-partial guards, linked issues. Record `aware` / `false` / `unknown`
-with the citation. An `aware` finding re-frames the report — "the
-check you started is missing on this path" — and predicts the
-wontfix closure if ignored.
+The runtime rejects `special_config_required: true` together with
+`premise_kind: attacker_only`. This is a coarse consistency rule, not a
+universal platform rejection rule for non-default deployments. If the
+facts do not fit the model neatly, state that limitation; do not hide the
+configuration or silently redefine the default.
 
-## 3. Trigger configuration — does it need a special setup?
+## Target provenance
 
-Two fields:
+Use [submission targets](submission-targets.md). Each proposed route needs
+an applicable source record (`source_url`, `checked_at`, `program_scope`)
+in the notes' Policy Sources section. Missing current rules make fit
+provisional; they must not become an invented guarantee. The primary is
+the proposed first intake, not an instruction to submit.
 
-- `special_config_required` — a boolean: can the attacker reach the
-  defect on the vendor's default, documented configuration?
-- `default_configuration` — one sentence on what the default actually
-  is, cited (config file default, README deployment guide, the read
-  that showed it).
+## Assemble from canonical state
 
-**The mechanical cross-check** the validator enforces: if
-`special_config_required` is true, the premise the Assess stage derived
-cannot be `attacker_only` — an attacker-only premise means the
-attacker creates the condition alone, on the default configuration.
-Conversely a `requires_operator_decision` premise with
-`special_config_required: false` deserves a second look at either the
-premise or the config answer. The two answers describe the same fact
-from two sides; disagreement means one of them is wrong.
+Use [the summary template](../templates/submission-summary.md). The notes'
+summary table is rendered from JSON; do not edit it independently. A
+standalone summary must agree with that state.
 
-Platform reality: a defect behind a non-default configuration is
-usually hardening, not a report (SRCs scope it out; maintainers
-classify it hardening; CNVD verification cannot reproduce it). State
-the enabling configuration honestly and let the target matrix carry
-the consequence — hiding it is the fastest route to a closed report
-and a burned channel.
+- Include only `report` and `rewrite_then_report` claims in the reportable
+  table, sorted by severity descending. Preserve the recorded order for
+  ties; explain a different proposed sending sequence when useful.
+- The `Order` column is a proposed delivery position. Follow the target's
+  actual urgency/batching rules and the submitter's decisions; there is
+  no requirement to wait for one response before drafting the next claim.
+- Put `hardening_note` claims in a separate improvement section, explaining
+  whether the limitation comes from policy or the acceptance heuristic.
+- Below the reportable table, include missing technical facts from
+  `needs_more_evidence`, acceptance `pending` and its `blocking_facts`,
+  awareness that changes the framing, and untraced timeline fields.
+- A reportable row's severity must agree with the advisory's stated rating.
+  Explain the chosen scoring system when the target uses a different one.
 
-## 4. Boundary crossed — the one sentence
-
-`from → to`, on the project's own trust ladder, naming the capability
-that becomes reachable: "from an unauthenticated network client to
-rewriting the stored credential of any named account". This is the
-most-read sentence of the whole submission (the advisory template
-carries the long version); the summary carries the one-line version.
-A claim with no boundary crossing is a functional bug, not a
-vulnerability, and belongs nowhere in the submittable list.
-
-## 5. The target list
-
-Per `references/submission-targets.md`: one `primary`, everything else
-`secondary` or `unsuitable`, each with its reason. The primary is the
-one channel that receives the submission; the reasons are part of the
-record because "why not the other channel" is the first question a
-careful submitter asks.
-
-## 6. Assembling the summary
-
-The final artifact (`templates/submission-summary.md`) is one table,
-one row per submittable claim — **sorted by severity, descending**
-(`critical` → `high` → `medium` → `low`; ties broken by core business
-first, then by premise cleanliness). The `Order` column still records
-the delivery position from `references/ordering-and-channels.md` —
-**the table ranks by harm, the sends still go by reception likelihood.**
-Those two orders are different on purpose: the submitter scans the
-table top-down for "how bad is what I have", but sends the cleanest
-premise first.
-
-| Order | Claim | Severity | Core business | Developer aware | Special config | Boundary crossed | Primary target | … |
-
-- Rows are **only** claims whose action is `report` or
-  `rewrite_then_report`. `hardening_note` claims are listed separately
-  as patches to offer; negative verdicts do not appear at all.
-- Every row's Severity comes from the claim's `submission.severity`
-  (the validator requires it — the table cannot be sorted without it),
-  and it must agree with the CVSS rating stated in the advisory draft.
-- Under the table: the blocking facts. Any `needs_more_evidence` claim
-  with its missing fact; any `aware` finding with its re-framing; any
-  timeline `untraced` field with what a trace would change.
-
-The summary is the last thing written and the first thing the
-submitter reads. If it does not answer "what do I submit, where, and
-why is each one safe to submit", it is not done.
+If nothing is reportable, the written findings and blocked assessment are
+still complete deliverables; do not fabricate a target list to fill an
+empty table. Deliver all applicable artifacts together for review.

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/Rinne666/mini-audit-skill/schemas/adjudication.schema.json",
+  "$id": "https://github.com/Rinne666/mini-adjudication/schemas/adjudication.schema.json",
   "title": "Vulnerability Claim Adjudication Ledgers",
   "description": "Structural requirements for claim decomposition, per-assertion refutation evidence, the mechanical derivation of both verdicts, work-queue closure, and delivery discipline. Passing this schema does not prove a verdict is correct or that a maintainer will accept a report.",
   "type": "object",
@@ -103,16 +103,16 @@
           },
           "validity": {
             "enum": ["holds", "does_not_hold", "needs_more_evidence", "already_fixed"],
-            "description": "Derived from the assertion verdicts, never asserted: any refuted -> does_not_hold; any fixed -> already_fixed; an unresolved defect, reachability or consequence -> needs_more_evidence; otherwise -> holds. An unresolved precondition does not block the validity: it says how easily the trigger fires, not whether the defect is there."
+            "description": "Derived from assertion verdicts: any refuted -> does_not_hold; any fixed -> already_fixed; missing or unconfirmed defect/reachability/consequence -> needs_more_evidence; otherwise -> holds. An unresolved precondition does not block validity once all three required elements are confirmed."
           },
           "validity_rationale": {"type": "string", "minLength": 1},
           "acceptance": {
             "type": "object",
-            "description": "Required when validity is holds. Never present for a claim that does not hold: such a claim is not a vulnerability, and is not 'unacceptable'.",
-            "required": ["premise_kind", "boundary_state", "divergence_state", "acceptability", "rationale", "evidence_ids"],
+            "description": "Required when validity is holds. Unknown premise requires pending, blocking_facts and needs_evidence; resolved acceptance additionally requires boundary_state and divergence_state.",
+            "required": ["premise_kind", "acceptability", "rationale", "evidence_ids"],
             "properties": {
               "premise_kind": {
-                "enum": ["attacker_only", "requires_operator_decision", "requires_ambient_state", "requires_third_party_misconfiguration"]
+                "enum": ["attacker_only", "requires_operator_decision", "requires_ambient_state", "requires_third_party_misconfiguration", "unknown"]
               },
               "premise_evidence": {"type": "string"},
               "boundary_state": {
@@ -148,7 +148,7 @@
               },
               "oss_verification": {
                 "type": "object",
-                "description": "Required on every holding claim when the target kind is open_source: the audit result checked one-by-one against the project's own record.",
+                "description": "Required for resolved acceptance when the target is open_source. Pending acceptance may omit this block while its premise is unknown.",
                 "required": ["policy_verified", "commit_timeline", "historical_similar", "maintainer_preference", "evidence_ids"],
                 "properties": {
                   "policy_verified": {
@@ -194,8 +194,9 @@
                 "additionalProperties": false
               },
               "acceptability": {
-                "enum": ["accept", "accept_after_rewrite", "decline"]
+                "enum": ["accept", "accept_after_rewrite", "decline", "pending"]
               },
+              "blocking_facts": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "The specific missing premise facts that prevent deciding acceptance. Required for pending; deliver a blocking explanation, not a report."},
               "rationale": {"type": "string", "minLength": 1},
               "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^E[0-9]{6}$"}}
             },
