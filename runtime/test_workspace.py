@@ -29,7 +29,8 @@ class WorkspaceTests(unittest.TestCase):
             notes = Path(directory) / "space dir/adjudication-test.md"
             result = self.command("init", notes, "--target", "Example", "--source-ref", "abc123", "--claim", "The login path skips a check")
             self.assertEqual(result.returncode, 0, result.stderr)
-            text = notes.read_text()
+            with notes.open(encoding="utf-8", newline="") as stream:
+                text = stream.read()
             state = ws.read_state(text)
             self.assertEqual(state["claims"][0]["source_ref"], "abc123")
             self.assertNotIn("validity", state["claims"][0])
@@ -63,25 +64,27 @@ class WorkspaceTests(unittest.TestCase):
             text = ws.initial_notes("Example", "closed_product", "rev-1", ["Original claim"])
             state = ws.read_state(text)
             state["claims"][0]["claim"] = "Revised claim"
-            notes.write_text(self.replace_state(text, state))
+            with notes.open("w", encoding="utf-8", newline="") as stream:
+                stream.write(self.replace_state(text, state))
             before = notes.read_bytes()
             self.assertEqual(self.command("render", notes, "--check").returncode, 1)
             self.assertEqual(notes.read_bytes(), before)
             self.assertEqual(self.command("render", notes).returncode, 0)
             self.assertEqual(self.command("render", notes, "--check").returncode, 0)
-            self.assertIn("Revised claim", notes.read_text().split(ws.VIEWS_START)[1])
+            self.assertIn("Revised claim", notes.read_text(encoding="utf-8").split(ws.VIEWS_START)[1])
 
     def test_legacy_or_broken_markers_are_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             notes = Path(directory) / "adjudication-legacy.md"
             for text in ("# My manual report\n", ws.initial_notes("Example", "open_source", "", []).replace(ws.VIEWS_END, "")):
-                notes.write_text(text)
+                with notes.open("w", encoding="utf-8", newline="") as stream:
+                    stream.write(text)
                 before = notes.read_bytes()
                 self.assertEqual(self.command("render", notes).returncode, 2)
                 self.assertEqual(notes.read_bytes(), before)
 
     def test_summary_orders_severity_and_keeps_pending_out_of_report_list(self):
-        state, err = va._extract_adjudication_table(FIXTURE.read_text())
+        state, err = va._extract_adjudication_table(FIXTURE.read_text(encoding="utf-8"))
         self.assertIsNone(err)
         high = state["claims"][0]
         low = json.loads(json.dumps(high))
@@ -102,7 +105,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("declared-invariant rule", views.split("## OSS Verification")[1].split("## Verdict Table")[0])
 
     def test_delivery_requires_current_views_and_uses_the_marked_state(self):
-        fixture_state, error = va._extract_adjudication_table(FIXTURE.read_text())
+        fixture_state, error = va._extract_adjudication_table(FIXTURE.read_text(encoding="utf-8"))
         self.assertIsNone(error)
         text = ws.initial_notes("Example", "open_source", "", [])
         text = self.replace_state(text, fixture_state)

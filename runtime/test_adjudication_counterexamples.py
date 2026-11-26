@@ -389,10 +389,10 @@ with tempfile.TemporaryDirectory() as raw_tmp:
 
     # Every caller using loaded evidence receives its integrity failures.
     ledger_path = stage(tmp)
-    rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    rows = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
     for row in rows:
         row["artifact"] = row["artifact"].replace("/", "\\")
-    ledger_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    ledger_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
     check("legacy Windows artifact paths remain portable", not run(base_text, ledger_path))
     artifact = ledger_path.parent / "evidence" / "E000001.txt"
     artifact.write_text("changed after capture", encoding="utf-8")
@@ -424,9 +424,9 @@ with tempfile.TemporaryDirectory() as raw_tmp:
     # New read records bind the captured artifact to the source bytes.
     ledger_path = stage(tmp)
     source = ledger_path.parent.parent / "app.php"
-    rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    rows = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
     rows[0]["source_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
-    ledger_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    ledger_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
     check("matching source fingerprint is accepted", not run(base_text, ledger_path))
     source.write_bytes(source.read_bytes() + b"\n// changed\n")
     expect_rejected("changed source fingerprint is rejected", base_text, ledger_path, "source changed")
@@ -435,10 +435,10 @@ with tempfile.TemporaryDirectory() as raw_tmp:
 
     ledger_path = stage(tmp)
     records, _ = _load_evidence_ledger(str(ledger_path))
-    schema = json.loads(va.SCHEMA_PATH.read_text())
+    schema = json.loads(va.SCHEMA_PATH.read_text(encoding="utf-8"))
     schema["unsupportedFutureRule"] = True
     bad_schema = tmp / "future-schema.json"
-    bad_schema.write_text(json.dumps(schema))
+    bad_schema.write_text(json.dumps(schema), encoding="utf-8")
     with patch.object(va, "SCHEMA_PATH", bad_schema):
         _, errors = validate(base_text, records)
     check("unsupported schema keywords fail explicitly", any("unsupported schema keyword" in error for error in errors))
