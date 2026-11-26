@@ -38,10 +38,36 @@ Search in decreasing order of authority:
    [reassessment after feedback](ordering-and-channels.md#reassess-after-feedback)).
 
 Each similar issue is recorded as a reference (GHSA id, CVE id, commit
-sha, issue number) plus its classification. "None found" is a valid
-answer and must carry what was searched — `{ref: "none found — GHSA
-repo query + NVD keyword + git log -p of the sink", classification:
-"unknown"}`.
+sha, issue number) plus its classification. When `classification` is
+`security_fix`, also record `transferable` (`true`/`false`) and
+`alignment_note` after running the Precedent Alignment Check below.
+"None found" is a valid answer and must carry what was searched — `{ref:
+"none found — GHSA repo query + NVD keyword + git log -p of the sink",
+classification: "unknown"}`.
+
+### Precedent Alignment Check (before citing any `security_fix` CVE)
+
+Matching a flaw *shape* (e.g., "path traversal", "missing check on update")
+is not enough to support acceptance. Before treating a historical
+`security_fix` advisory as transferable evidence, check all three axes:
+
+1. **Product execution model parity**: does the precedent live in a
+   product/module with the same execution ceiling? A path traversal in an
+   artifact *storage* product (where uploaders cannot run code) does not
+   transfer to an execution *engine* where the upload endpoint already
+   deploys arbitrary executable code.
+2. **Precondition / privilege (`PR`) parity**: does the current claim
+   require the same or lower privilege than the precedent? A CVE for a
+   low-privilege or unauthenticated caller does not support a claim that
+   requires `WRITE`/code-upload or a cluster-node mTLS certificate.
+3. **Target isolation parity**: did the precedent breach *another*
+   principal's or restricted component's boundary, whereas the current
+   claim only mutates metadata on an object the caller already holds
+   `WRITE` on?
+
+If any of the three fails, set `transferable: false` and explain the
+mismatch in `alignment_note`. Do not use a non-transferable precedent to
+justify `accept`.
 
 ## 2. The classification labels
 

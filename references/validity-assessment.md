@@ -90,6 +90,31 @@ the code may still be wrong, but it is not a security issue.
 Watch for the near-miss: "a user can overwrite their own session" is
 self-inflicted; "a user can overwrite *another user's* session" is not.
 
+### Existing privilege subsumes the claimed impact (privilege ceiling)
+
+Even when a defect is real in code, a caller whose starting role or
+channel already grants an equal or higher capability has not crossed a
+boundary worth a security advisory. Check whether the caller's
+legitimate prerequisite already includes:
+
+- **Arbitrary code / plugin / script execution** (e.g., uploading custom
+  code bundles, deploying executable extensions, or writing flow
+  components with JVM/OS access): a path traversal or metadata mutation
+  reachable only with that role does not elevate capability unless it
+  escapes a declared sandbox (`Restricted` components, container/OS
+  isolation) or reaches another principal's isolated secrets/resources.
+- **Same-object `WRITE` ceiling**: if the caller already holds `WRITE`
+  on the target object and the product treats `WRITE` on that object as
+  the security boundary, an unvalidated metadata write on that same
+  object is defense-in-depth hardening unless it breaches a separate
+  protected principal, bucket, or component the caller cannot access.
+
+When the defect exists in code (`holds` on technical validity) but
+remains under the caller's existing privilege ceiling or inside a
+trusted infrastructure channel, record that explicitly in the Assess
+stage's `privilege_ceiling` gate so acceptability derives `decline`
+(`hardening_note`) rather than a vulnerability report.
+
 ### The claimed impact is bounded
 
 The sink may sanitize, truncate, or confine the value. Read the sink,

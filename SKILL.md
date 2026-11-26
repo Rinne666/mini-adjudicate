@@ -109,15 +109,25 @@ and the built-in acceptance matrix are **heuristics**, not platform rules
 or promises of acceptance. State any conflict or limitation explicitly;
 do not change factual inputs merely to obtain a desired verdict.
 
-Answer three questions with evidence:
+Answer three questions and the Privilege-Ceiling Gate with evidence:
 
 1. **Premise:** who creates the condition? Use `attacker_only`,
-   `requires_operator_decision`, `requires_ambient_state`,
-   `requires_third_party_misconfiguration`, or `unknown`.
+   `requires_privileged_or_trusted_channel`, `requires_operator_decision`,
+   `requires_ambient_state`, `requires_third_party_misconfiguration`, or
+   `unknown`.
 2. **Boundary:** `declared_and_violated`, `declared_and_consistent`, or
    `not_declared`, based on the target's own trust model.
 3. **Divergence:** `present` with both same-version paths cited, or
-   `absent` with two distinct captured zero-match searches.
+   `absent` with two distinct captured zero-match searches. Note that a
+   divergence inside an already privileged role or trusted infrastructure
+   channel indicates defense-in-depth inconsistency, not a CVE by itself.
+4. **Privilege-Ceiling Gate (`acceptance.privilege_ceiling`):** record
+   `caller_existing_ceiling`, `net_new_capability`,
+   `subsumed_by_existing_privilege` (`true`/`false`), and
+   `trusted_infrastructure_channel` (`true`/`false`). If the caller's
+   starting role already grants code execution/admin power or the entry
+   is an operator-secured internal channel and no isolated principal or
+   sandbox is breached, the matrix derives `decline`.
 
 The shared decision table is in
 [premise analysis](references/premise-analysis.md#acceptance-matrix).

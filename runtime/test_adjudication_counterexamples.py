@@ -303,6 +303,42 @@ with tempfile.TemporaryDirectory() as raw_tmp:
         rebuild(base_text, obj), ledger_path, "submission.severity",
     )
 
+    # 16. Subsumed by existing privilege cannot claim accept/report.
+    ledger_path = stage(tmp)
+    obj = extract(base_text)
+    claim(obj, "C1")["acceptance"]["privilege_ceiling"]["subsumed_by_existing_privilege"] = True
+    expect_rejected(
+        "subsumed privilege claiming accept is rejected",
+        rebuild(base_text, obj), ledger_path, "derive",
+    )
+
+    # 17. Trusted infrastructure channel cannot claim accept/report.
+    ledger_path = stage(tmp)
+    obj = extract(base_text)
+    claim(obj, "C1")["acceptance"]["privilege_ceiling"]["trusted_infrastructure_channel"] = True
+    expect_rejected(
+        "trusted infrastructure channel claiming accept is rejected",
+        rebuild(base_text, obj), ledger_path, "derive",
+    )
+
+    # 18. requires_privileged_or_trusted_channel cannot claim accept.
+    ledger_path = stage(tmp)
+    obj = extract(base_text)
+    claim(obj, "C1")["acceptance"]["premise_kind"] = "requires_privileged_or_trusted_channel"
+    expect_rejected(
+        "privileged/trusted-channel premise claiming accept is rejected",
+        rebuild(base_text, obj), ledger_path, "derive",
+    )
+
+    # 19. security_fix precedent without alignment check is rejected.
+    ledger_path = stage(tmp)
+    obj = extract(base_text)
+    claim(obj, "C1")["acceptance"]["oss_verification"]["historical_similar"][0].pop("transferable", None)
+    expect_rejected(
+        "security_fix precedent without transferable check is rejected",
+        rebuild(base_text, obj), ledger_path, "transferable",
+    )
+
     # The action must be determined by BOTH verdicts, not just validity.
     for verdict, premise, boundary, expected_action in (
         ("decline", "attacker_only", "declared_and_consistent", "hardening_note"),

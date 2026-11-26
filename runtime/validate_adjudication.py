@@ -99,6 +99,7 @@ ASSERTION_TYPES = {"defect", "reachability", "consequence", "precondition"}
 PREMISE_KINDS = {
     "unknown",
     "attacker_only",
+    "requires_privileged_or_trusted_channel",
     "requires_operator_decision",
     "requires_ambient_state",
     "requires_third_party_misconfiguration",
@@ -467,11 +468,20 @@ def _derive_validity(assertion_types: list[str], assertion_verdicts: list[str]) 
     return "holds"
 
 
-def _derive_acceptability(premise_kind: str, boundary_state: str | None, divergence_state: str | None) -> str:
-    """Derive the acceptability verdict mechanically from the three answers."""
+def _derive_acceptability(
+    premise_kind: str,
+    boundary_state: str | None,
+    divergence_state: str | None,
+    *,
+    subsumed: bool = False,
+    trusted_channel: bool = False,
+) -> str:
+    """Derive the acceptability verdict mechanically from the acceptance answers."""
     if premise_kind == "unknown":
         return "pending"
     if boundary_state == "declared_and_consistent":
+        return "decline"
+    if subsumed or trusted_channel:
         return "decline"
     if premise_kind == "attacker_only" and divergence_state == "present":
         return "accept"
@@ -648,6 +658,18 @@ def _validate_oss_verification(at: str, oss: object, records: dict[str, dict]) -
                     f"{at}.acceptance.oss_verification.historical_similar[{k}].classification "
                     f"must be one of {sorted(CLASSIFICATIONS)}, got {item.get('classification')!r}"
                 )
+            elif item.get("classification") == "security_fix":
+                if not isinstance(item.get("transferable"), bool):
+                    errors.append(
+                        f"{at}.acceptance.oss_verification.historical_similar[{k}].transferable "
+                        f"must be true or false when classification is 'security_fix' "
+                        f"(verify execution model, privilege parity, and target isolation)"
+                    )
+                if not _non_empty_str(item.get("alignment_note")):
+                    errors.append(
+                        f"{at}.acceptance.oss_verification.historical_similar[{k}].alignment_note "
+                        f"must explain precedent alignment when classification is 'security_fix'"
+                    )
     if not _non_empty_str(oss.get("maintainer_preference")):
         errors.append(
             f"{at}.acceptance.oss_verification.maintainer_preference must state the project's "
@@ -933,7 +955,7 @@ def _validate_acceptance(at: str, acceptance: dict, records: dict[str, dict]) ->
     pending = acceptance.get("premise_kind") == "unknown"
     required_fields = ["premise_kind", "acceptability", "rationale", "evidence_ids"]
     if not pending:
-        required_fields.extend(["boundary_state", "divergence_state"])
+        required_fields.extend(["boundary_state", "divergence_state", "privilege_ceiling"])
     for required in required_fields:
         if required not in acceptance:
             errors.append(f"{at}.acceptance missing required field: {required}")
@@ -953,6 +975,33 @@ def _validate_acceptance(at: str, acceptance: dict, records: dict[str, dict]) ->
         errors.append(
             f"{at}.acceptance.divergence_state must be one of {sorted(DIVERGENCE_STATES)}, got {divergence_state!r}"
         )
+
+    ceiling = acceptance.get("privilege_ceiling")
+    subsumed = False
+    trusted_channel = False
+    ceiling_valid = pending and ceiling is None
+    if ceiling is not None:
+        if not isinstance(ceiling, dict):
+            errors.append(
+                f"{at}.acceptance.privilege_ceiling must be an object "
+                f"(caller_existing_ceiling / net_new_capability / subsumed_by_existing_privilege / trusted_infrastructure_channel)"
+            )
+        else:
+            if not _non_empty_str(ceiling.get("caller_existing_ceiling")):
+                errors.append(f"{at}.acceptance.privilege_ceiling.caller_existing_ceiling must be non-empty")
+            if not _non_empty_str(ceiling.get("net_new_capability")):
+                errors.append(f"{at}.acceptance.privilege_ceiling.net_new_capability must be non-empty")
+            subsumed_val = ceiling.get("subsumed_by_existing_privilege")
+            trusted_val = ceiling.get("trusted_infrastructure_channel")
+            if not isinstance(subsumed_val, bool):
+                errors.append(f"{at}.acceptance.privilege_ceiling.subsumed_by_existing_privilege must be true or false")
+            if not isinstance(trusted_val, bool):
+                errors.append(f"{at}.acceptance.privilege_ceiling.trusted_infrastructure_channel must be true or false")
+            if isinstance(subsumed_val, bool) and isinstance(trusted_val, bool):
+                subsumed = subsumed_val
+                trusted_channel = trusted_val
+                ceiling_valid = True
+
     acceptability = acceptance.get("acceptability")
     if acceptability not in ACCEPTABILITY:
         errors.append(
@@ -969,18 +1018,26 @@ def _validate_acceptance(at: str, acceptance: dict, records: dict[str, dict]) ->
     elif acceptability == "pending":
         errors.append(f"{at}.acceptance pending requires premise_kind 'unknown'")
 
-    # The acceptability verdict must be derived from the three answers.
+    # The acceptability verdict must be derived from the acceptance answers and privilege ceiling.
     if (
         premise_kind in PREMISE_KINDS
         and (pending or boundary_state in BOUNDARY_STATES)
         and (pending or divergence_state in DIVERGENCE_STATES)
+        and ceiling_valid
         and acceptability in ACCEPTABILITY
     ):
-        derived = _derive_acceptability(premise_kind, boundary_state, divergence_state)
+        derived = _derive_acceptability(
+            premise_kind,
+            boundary_state,
+            divergence_state,
+            subsumed=subsumed,
+            trusted_channel=trusted_channel,
+        )
         if derived != acceptability:
             errors.append(
-                f"{at}.acceptance.acceptability is {acceptability!r} but the three answers derive "
-                f"{derived!r} (premise={premise_kind}, boundary={boundary_state}, divergence={divergence_state})"
+                f"{at}.acceptance.acceptability is {acceptability!r} but the acceptance answers derive "
+                f"{derived!r} (premise={premise_kind}, boundary={boundary_state}, "
+                f"divergence={divergence_state}, subsumed={subsumed}, trusted_channel={trusted_channel})"
             )
 
     if divergence_state == "present":

@@ -108,11 +108,35 @@
           "validity_rationale": {"type": "string", "minLength": 1},
           "acceptance": {
             "type": "object",
-            "description": "Required when validity is holds. Unknown premise requires pending, blocking_facts and needs_evidence; resolved acceptance additionally requires boundary_state and divergence_state.",
+            "description": "Required when validity is holds. Unknown premise requires pending, blocking_facts and needs_evidence; resolved acceptance additionally requires boundary_state, divergence_state and privilege_ceiling.",
             "required": ["premise_kind", "acceptability", "rationale", "evidence_ids"],
             "properties": {
               "premise_kind": {
-                "enum": ["attacker_only", "requires_operator_decision", "requires_ambient_state", "requires_third_party_misconfiguration", "unknown"]
+                "enum": [
+                  "attacker_only",
+                  "requires_privileged_or_trusted_channel",
+                  "requires_operator_decision",
+                  "requires_ambient_state",
+                  "requires_third_party_misconfiguration",
+                  "unknown"
+                ]
+              },
+              "privilege_ceiling": {
+                "type": "object",
+                "description": "Required for resolved acceptance: checks whether the claimed impact is already subsumed by the caller's starting role or gated behind an operator-secured infrastructure channel.",
+                "required": [
+                  "caller_existing_ceiling",
+                  "net_new_capability",
+                  "subsumed_by_existing_privilege",
+                  "trusted_infrastructure_channel"
+                ],
+                "properties": {
+                  "caller_existing_ceiling": {"type": "string", "minLength": 1},
+                  "net_new_capability": {"type": "string", "minLength": 1},
+                  "subsumed_by_existing_privilege": {"type": "boolean"},
+                  "trusted_infrastructure_channel": {"type": "boolean"}
+                },
+                "additionalProperties": false
               },
               "premise_evidence": {"type": "string"},
               "boundary_state": {
@@ -179,6 +203,15 @@
                         "classification": {
                           "enum": ["security_fix", "hardening", "bug_fix", "wontfix", "unknown"],
                           "description": "How the project itself classified the similar issue."
+                        },
+                        "transferable": {
+                          "type": "boolean",
+                          "description": "Required when classification is security_fix: whether execution model, privilege parity, and target isolation align with this claim."
+                        },
+                        "alignment_note": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Required when classification is security_fix: explains why the precedent transfers or why it does not."
                         }
                       },
                       "additionalProperties": false

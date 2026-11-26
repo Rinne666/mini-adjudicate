@@ -108,9 +108,9 @@ fixture advisory precedents used in the OSS assessment.
 
 Only claim 1 holds, so it is the only claim that reaches this stage.
 
-| Claim | Q1 Premise | Q2 Boundary | Q3 Divergence | Acceptability | Rationale |
-|---|---|---|---|---|---|
-| 1 | `attacker_only` | `declared_and_violated` | `present` | `accept` | The attacker is anonymous and holds only a username. E000012 shows that the default factory installs an adapter returning empty for every ordinary login request; this proves the trigger without guessing about an external provider. The login path violates the declared no-opinion rule while the probe and admin plane honour it. |
+| Claim | Q1 Premise | Q2 Boundary | Q3 Divergence | Privilege Ceiling | Acceptability | Rationale |
+|---|---|---|---|---|---|---|
+| 1 | `attacker_only` | `declared_and_violated` | `present` | `subsumed=false, trusted_channel=false` — unauthenticated client → rewriting any named account's stored credential | `accept` | The attacker is anonymous and holds only a username. E000012 shows that the default factory installs an adapter returning empty for every ordinary login request; this proves the trigger without guessing about an external provider. The login path violates the declared no-opinion rule while the probe and admin plane honour it. |
 
 ## OSS Verification
 
@@ -251,6 +251,12 @@ reported; knowing the no-override default does not reveal a live setting.
           "fixtures/mini-adjudication/app.php:157 — the admin plane refuses the same empty answer"
         ],
         "divergence_state": "present",
+        "privilege_ceiling": {
+          "caller_existing_ceiling": "unauthenticated network client holding only a username; no login, code-upload, or write privileges",
+          "net_new_capability": "rewriting any named account's stored password hash and authenticating as that account",
+          "subsumed_by_existing_privilege": false,
+          "trusted_infrastructure_channel": false
+        },
         "divergence_sides": [
           {
             "file_line": "fixtures/mini-adjudication/app.php:108",
@@ -274,7 +280,9 @@ reported; knowing the no-override default does not reveal a live setting.
           "historical_similar": [
             {
               "ref": "ADV-0001 (SECURITY.md advisory table)",
-              "classification": "security_fix"
+              "classification": "security_fix",
+              "transferable": true,
+              "alignment_note": "Same product execution model, same unauthenticated/empty-response precondition, and same account-authentication boundary."
             },
             {
               "ref": "ADV-0002 (SECURITY.md advisory table)",

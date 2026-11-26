@@ -154,6 +154,21 @@ check(
     _derive_acceptability("requires_third_party_misconfiguration", "not_declared", "absent"),
     "decline",
 )
+check(
+    "privileged or trusted channel declines even with divergence",
+    _derive_acceptability("requires_privileged_or_trusted_channel", "not_declared", "present"),
+    "decline",
+)
+check(
+    "subsumed by existing privilege declines even with attacker_only + present",
+    _derive_acceptability("attacker_only", "not_declared", "present", subsumed=True),
+    "decline",
+)
+check(
+    "trusted infrastructure channel declines even with attacker_only + present",
+    _derive_acceptability("attacker_only", "not_declared", "present", trusted_channel=True),
+    "decline",
+)
 
 # --- trigger-configuration / premise consistency --------------------------
 

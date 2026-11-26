@@ -29,6 +29,11 @@ the assessment. Never turn absence of a policy into a made-up authority.
 Extract only what affects the decision:
 
 - The trust model: actors, granted capabilities, and protected resources.
+  Specifically check whether a role's legitimate capability already
+  includes supplying custom code/plugins/scripts or accessing JVM/OS
+  features (making that `WRITE`/upload role itself the security
+  boundary), and whether peer protocols (cluster mTLS sockets, loopback
+  management ports) are declared as operator-secured boundaries.
 - Covered products, versions, deployments, assets, and issue classes.
 - Explicit exclusions and any exceptions for supported configurations.
 - Required evidence, reproduction conditions, and report format.

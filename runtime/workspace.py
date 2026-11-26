@@ -104,8 +104,22 @@ def render_views(state: dict) -> str:
     sections.append(_table("Assertion Ledger", ["Claim", "Assertion", "Verdict", "Refutation attempted", "Evidence"],
                            [[c.get("id"), a.get("id"), a.get("verdict"), a.get("refutation_attempted"), a.get("evidence_ids")] for c, a in assertions]))
     assessments = [(c, _obj(c["acceptance"])) for c in claims if c.get("acceptance") is not None]
-    sections.append(_table("Acceptance Answers", ["Claim", "Premise", "Boundary", "Divergence", "Acceptability", "Rationale", "Blocking facts", "Evidence"],
-                           [[c.get("id"), a.get("premise_kind"), a.get("boundary_state"), a.get("divergence_state"), a.get("acceptability"), a.get("rationale"), a.get("blocking_facts"), a.get("evidence_ids")] for c, a in assessments]))
+    acceptance_rows = []
+    for c, a in assessments:
+        pc = a.get("privilege_ceiling")
+        ceiling_summary = ""
+        if isinstance(pc, dict):
+            ceiling_summary = (
+                f"subsumed={pc.get('subsumed_by_existing_privilege')}, "
+                f"trusted_channel={pc.get('trusted_infrastructure_channel')} "
+                f"({pc.get('caller_existing_ceiling', '')} → {pc.get('net_new_capability', '')})"
+            )
+        acceptance_rows.append([
+            c.get("id"), a.get("premise_kind"), a.get("boundary_state"), a.get("divergence_state"),
+            ceiling_summary, a.get("acceptability"), a.get("rationale"), a.get("blocking_facts"), a.get("evidence_ids"),
+        ])
+    sections.append(_table("Acceptance Answers", ["Claim", "Premise", "Boundary", "Divergence", "Privilege ceiling", "Acceptability", "Rationale", "Blocking facts", "Evidence"],
+                           acceptance_rows))
     oss_rows = []
     for c, a in assessments:
         if a.get("oss_verification") is None:
