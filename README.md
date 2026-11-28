@@ -173,10 +173,10 @@ reportability without touching live deployments), the bundled
 [cnvd-packager](skills/cnvd-packager/SKILL.md) skill and `/cnvd-pack` command
 handle post-adjudication CNVD delivery:
 
-1. **Filter & Align:** ingest `mini-adjudication` (`accept` / `accept_after_rewrite`) or `security-audit` (`confirmed`) outputs and align target URLs + low-privilege test accounts.
-2. **Capture Evidence:** execute live verification and save key screenshots (`screenshots/`) covering the exploit execution and verified impact.
-3. **Render Word + Video:** render a unified 5-section CNVD `.docx` report (overview, source location, illustrated reproduction, impact, remediation) and produce `复现视频.mp4` meeting the declarative Chinese-voiceover video acceptance gate.
-4. **Bundle:** assemble `{产品名}_{漏洞类型}_{简短标识}/` containing the `.docx`, `复现视频.mp4`, optional `poc/`, and `screenshots/`.
+1. **Filter & Align:** ingest `mini-adjudication` (`accept` / `accept_after_rewrite`) or `security-audit` (`confirmed`) outputs, select capture track (`web` headed-Chrome default or `cli` fallback), and align target URLs + low-privilege test accounts.
+2. **Capture Evidence:** execute live verification from a clean single run and save key screenshots (`截图/`) matching embedded report figures 1:1.
+3. **Render Word + PoC + Video:** render the 3-section report (`报告.docx`: `一、源码成因` → `二、复现步骤与关键截图` → `三、修复建议` per [report-template.md](skills/cnvd-packager/references/report-template.md)), `PoC.md`, executable `PoC.sh`, and a zero-overlay Audio-First `复现视频.mp4` (`>= 24 fps`, `>= 24 kHz` Chinese voiceover, stepped pacing) per [video-production.md](skills/cnvd-packager/references/video-production.md).
+4. **Bundle & Verify:** assemble per-vulnerability directories containing `报告.docx`, `PoC.md`, `PoC.sh`, `复现视频.mp4`, and `截图/`, then pass `skills/cnvd-packager/scripts/verify_cnvd_package.py`.
 
 Run `npm test` for regression checks. After intentional changes to tracked
 skill files, refresh the manifest using

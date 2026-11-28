@@ -1,7 +1,7 @@
 {
   "name": "mini-adjudication",
   "version": "5.2.0",
-  "description": "Post-audit vulnerability acceptance standard and CNVD packaging pipeline: judge whether audited findings hold (/adjudicate) and package accepted findings into CNVD Word reports, narrated videos, and submission bundles (/cnvd-pack).",
+  "description": "Post-audit vulnerability acceptance standard and CNVD packaging pipeline: judge whether audited findings hold (/adjudicate) and package accepted findings into 3-section Word reports (报告.docx), PoC.md/PoC.sh, screenshots, and zero-overlay narrated videos (/cnvd-pack).",
   "bin": {
     "mini-adjudication": "bin/cli.js"
   },

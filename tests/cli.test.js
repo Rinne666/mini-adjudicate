@@ -172,6 +172,9 @@ test('cnvd-packager skill and /cnvd-pack command install, link, verify, and unin
   const cnvdCmd = (scope = 'user') => path.join(home, scope === 'claude' ? '.claude' : '.zcode', 'commands', 'cnvd-pack.md');
   ok(callCli(home, ['install', '--all']));
   assert.ok(fs.existsSync(path.join(cnvdSkill('user'), 'SKILL.md')));
+  assert.ok(fs.existsSync(path.join(cnvdSkill('user'), 'references', 'report-template.md')));
+  assert.ok(fs.existsSync(path.join(cnvdSkill('user'), 'references', 'video-production.md')));
+  assert.ok(fs.existsSync(path.join(cnvdSkill('user'), 'scripts', 'verify_cnvd_package.py')));
   assert.ok(fs.existsSync(path.join(cnvdSkill('zcode'), 'SKILL.md')));
   assert.ok(fs.existsSync(path.join(cnvdSkill('claude'), 'SKILL.md')));
   const cmdText = fs.readFileSync(cnvdCmd('user'), 'utf8');

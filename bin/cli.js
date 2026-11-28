@@ -28,7 +28,12 @@ const SKILLS = [
   {
     name: 'cnvd-packager',
     sourceSubdir: path.join('skills', 'cnvd-packager'),
-    requiredFiles: ['SKILL.md'],
+    requiredFiles: [
+      'SKILL.md',
+      'references/report-template.md',
+      'references/video-production.md',
+      'scripts/verify_cnvd_package.py',
+    ],
     verifySelfManifest: false,
     allowLegacy: false,
   },
