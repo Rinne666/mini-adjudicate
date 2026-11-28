@@ -11,9 +11,45 @@ const { findPython, requirePython } = require('./python');
 const PKG_ROOT = path.resolve(__dirname, '..');
 const SKILL_NAME = 'mini-adjudication';
 const PAYLOAD = new Set([
-  'bin', 'cli', 'package.json', 'SKILL.md', 'README.md', 'references',
+  'bin', 'cli', 'skills', 'package.json', 'SKILL.md', 'README.md', 'references',
   'templates', 'schemas', 'runtime', 'fixtures', '_meta.json',
 ]);
+const SKILLS = [
+  {
+    name: 'mini-adjudication',
+    sourceSubdir: null,
+    requiredFiles: [
+      'bin/cli.js', 'bin/python.js', 'runtime/validate_adjudication.py',
+      'cli/commands/adjudicate.md', 'cli/commands/cnvd-pack.md',
+    ],
+    verifySelfManifest: true,
+    allowLegacy: true,
+  },
+  {
+    name: 'cnvd-packager',
+    sourceSubdir: path.join('skills', 'cnvd-packager'),
+    requiredFiles: ['SKILL.md'],
+    verifySelfManifest: false,
+    allowLegacy: false,
+  },
+];
+const COMMANDS = [
+  {
+    fileName: 'adjudicate.md',
+    targetSkill: 'mini-adjudication',
+    cliSkill: 'mini-adjudication',
+    legacyCheck: (text, dir) =>
+      text.includes('# /adjudicate — 审计后受理裁定')
+      && text.includes('加载并严格按 `mini-adjudication` 技能执行')
+      && text.includes(`\`${dir}\``),
+  },
+  {
+    fileName: 'cnvd-pack.md',
+    targetSkill: 'cnvd-packager',
+    cliSkill: 'mini-adjudication',
+    legacyCheck: null,
+  },
+];
 const SCOPES = ['user', 'zcode', 'claude'];
 const MARKER = '<!-- mini-adjudication managed command v1 -->';
 const HOOK_NOTICE = 'Hooks are not registered or verified by this installer. Run the phase gates manually unless you have separately configured and tested your harness hooks.';
@@ -21,12 +57,12 @@ const HOOK_NOTICE = 'Hooks are not registered or verified by this installer. Run
 function skillRoot(scope) {
   return path.join(os.homedir(), { user: '.agents', zcode: '.zcode', claude: '.claude' }[scope], 'skills');
 }
-function skillDir(scope) { return path.join(skillRoot(scope), SKILL_NAME); }
-function receiptPath(scope) { return path.join(skillRoot(scope), `.${SKILL_NAME}.installation.json`); }
-function commandPath(scope) {
-  return path.join(os.homedir(), scope === 'claude' ? '.claude' : '.zcode', 'commands', 'adjudicate.md');
+function skillDir(scope, skillName = SKILL_NAME) { return path.join(skillRoot(scope), skillName); }
+function receiptPath(scope, skillName = SKILL_NAME) { return path.join(skillRoot(scope), `.${skillName}.installation.json`); }
+function commandPath(scope, fileName = 'adjudicate.md') {
+  return path.join(os.homedir(), scope === 'claude' ? '.claude' : '.zcode', 'commands', fileName);
 }
-function commandReceiptPath(scope) { return `${commandPath(scope)}.mini-adjudication.json`; }
+function commandReceiptPath(scope, fileName = 'adjudicate.md') { return `${commandPath(scope, fileName)}.mini-adjudication.json`; }
 function exists(file) {
   try { fs.lstatSync(file); return true; } catch (error) {
     if (error.code === 'ENOENT') return false;
@@ -35,17 +71,17 @@ function exists(file) {
 }
 function sha(data) { return crypto.createHash('sha256').update(data).digest('hex'); }
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
-function readReceipt(scope) {
-  const file = receiptPath(scope);
+function readReceipt(scope, skillName = SKILL_NAME) {
+  const file = receiptPath(scope, skillName);
   if (!exists(file)) return null;
   const receipt = readJson(file);
   if (receipt.schema_version !== 1 || receipt.scope !== scope
-      || !['copy', 'link'].includes(receipt.mode) || receipt.destination !== skillDir(scope)
+      || !['copy', 'link'].includes(receipt.mode) || receipt.destination !== skillDir(scope, skillName)
       || !receipt.files || typeof receipt.files !== 'object' || Array.isArray(receipt.files)) {
     throw new Error(`Invalid installation receipt: ${file}`);
   }
   for (const [name, hash] of Object.entries(receipt.files)) {
-    safeChild(skillDir(scope), name);
+    safeChild(skillDir(scope, skillName), name);
     if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`Invalid file hash in ${file}`);
   }
   return receipt;
@@ -82,19 +118,24 @@ function isPayload(relative) {
   return PAYLOAD.has(parts[0]) && !parts.includes('__pycache__')
     && !parts.some((part) => /\.(py[co]|tgz)$/.test(part));
 }
-function payloadFiles(root) {
+function payloadFiles(root, skillSpec = SKILLS[0]) {
+  const sourceRoot = skillSpec.sourceSubdir ? path.join(root, skillSpec.sourceSubdir) : root;
   const result = {};
   function visit(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const file = path.join(dir, entry.name);
-      const relative = path.relative(root, file);
-      if (!isPayload(relative)) continue;
+      const relative = path.relative(sourceRoot, file);
+      if (!skillSpec.sourceSubdir && !isPayload(relative)) continue;
+      if (skillSpec.sourceSubdir) {
+        const parts = relative.split(path.sep);
+        if (parts.includes('__pycache__') || parts.some((part) => /\.(py[co]|tgz)$/.test(part))) continue;
+      }
       if (entry.isSymbolicLink()) throw new Error(`Package payload must not contain a symlink: ${relative}`);
       if (entry.isDirectory()) visit(file);
       else if (entry.isFile()) result[relative.split(path.sep).join('/')] = sha(fs.readFileSync(file));
     }
   }
-  visit(root);
+  visit(sourceRoot);
   return result;
 }
 function verifyManifest(root) {
@@ -113,18 +154,18 @@ function shellQuote(value) {
     ? `'${portable.replaceAll("'", "''")}'`
     : `'${portable.replaceAll("'", "'\\''")}'`;
 }
-function renderCommand(dest, root = PKG_ROOT) {
-  return fs.readFileSync(path.join(root, 'cli', 'commands', 'adjudicate.md'), 'utf8')
+function renderCommand(dest, root = PKG_ROOT, fileName = 'adjudicate.md', cliRoot = root) {
+  return fs.readFileSync(path.join(root, 'cli', 'commands', fileName), 'utf8')
     .replaceAll('{{SKILL_DIR}}', dest.split(path.sep).join('/'))
-    .replaceAll('{{CLI_COMMAND}}', `node ${shellQuote(path.join(dest, 'bin', 'cli.js'))}`)
+    .replaceAll('{{CLI_COMMAND}}', `node ${shellQuote(path.join(cliRoot, 'bin', 'cli.js'))}`)
     .replaceAll('{{SHELL_NAME}}', process.platform === 'win32' ? 'Windows PowerShell' : 'POSIX shell');
 }
 function groupScopes(scope) { return scope === 'claude' ? ['claude'] : ['user', 'zcode']; }
-function assertCommandOwned(scope) {
-  const file = commandPath(scope);
+function assertCommandOwned(scope, cmdSpec = COMMANDS[0]) {
+  const file = commandPath(scope, cmdSpec.fileName);
   if (!exists(file)) return;
   const text = fs.readFileSync(file, 'utf8');
-  const receiptFile = commandReceiptPath(scope);
+  const receiptFile = commandReceiptPath(scope, cmdSpec.fileName);
   if (exists(receiptFile)) {
     const receipt = readJson(receiptFile);
     if (receipt.schema_version === 1 && receipt.sha256 === sha(text) && text.includes(MARKER)) return;
@@ -132,18 +173,21 @@ function assertCommandOwned(scope) {
   }
   // Migrate recognizable legacy commands with a backup. Merely mentioning
   // the skill name is not enough to establish ownership.
-  if (text.includes('# /adjudicate — 审计后受理裁定')
-      && text.includes('加载并严格按 `mini-adjudication` 技能执行')
-      && groupScopes(scope).some((s) => [skillDir(s), skillDir(s).split(path.sep).join('/')]
-        .some((dir) => text.includes(`\`${dir}\``)))) return;
+  if (cmdSpec.legacyCheck && groupScopes(scope).some((s) => [skillDir(s, cmdSpec.targetSkill), skillDir(s, cmdSpec.targetSkill).split(path.sep).join('/')]
+    .some((dir) => cmdSpec.legacyCheck(text, dir)))) return;
   throw new Error(`An unmanaged command already exists; preserving it: ${file}`);
 }
-function syncCommand(scope) {
-  assertCommandOwned(scope);
-  const file = commandPath(scope);
-  const receiptFile = commandReceiptPath(scope);
-  const target = groupScopes(scope).find((s) => exists(path.join(skillDir(s), 'SKILL.md')) && exists(receiptPath(s)));
-  if (!target) {
+function findCommandTargets(scope, cmdSpec) {
+  const target = groupScopes(scope).find((s) => exists(path.join(skillDir(s, cmdSpec.targetSkill), 'SKILL.md')) && exists(receiptPath(s, cmdSpec.targetSkill)));
+  const cliTarget = groupScopes(scope).find((s) => exists(path.join(skillDir(s, cmdSpec.cliSkill), 'bin', 'cli.js')) && exists(receiptPath(s, cmdSpec.cliSkill)));
+  return { target, cliTarget };
+}
+function syncCommand(scope, cmdSpec = COMMANDS[0]) {
+  assertCommandOwned(scope, cmdSpec);
+  const file = commandPath(scope, cmdSpec.fileName);
+  const receiptFile = commandReceiptPath(scope, cmdSpec.fileName);
+  const { target, cliTarget } = findCommandTargets(scope, cmdSpec);
+  if (!target || !cliTarget) {
     if (exists(file)) fs.unlinkSync(file);
     if (exists(receiptFile)) fs.unlinkSync(receiptFile);
     return;
@@ -153,9 +197,9 @@ function syncCommand(scope) {
     fs.copyFileSync(file, backup);
     console.log(`  retained legacy command backup ${backup}`);
   }
-  const text = renderCommand(skillDir(target), skillDir(target));
+  const text = renderCommand(skillDir(target, cmdSpec.targetSkill), skillDir(cliTarget, cmdSpec.cliSkill), cmdSpec.fileName, skillDir(cliTarget, cmdSpec.cliSkill));
   atomicWrite(file, text);
-  atomicWrite(receiptFile, JSON.stringify({ schema_version: 1, target_scope: target, sha256: sha(text) }, null, 2) + '\n');
+  atomicWrite(receiptFile, JSON.stringify({ schema_version: 1, target_scope: target, cli_scope: cliTarget, sha256: sha(text) }, null, 2) + '\n');
   console.log(`  command ${file} -> ${target}`);
 }
 function legacyInstallation(dest) {
@@ -164,23 +208,19 @@ function legacyInstallation(dest) {
       && /^name: mini-adjudication\s*$/m.test(fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'));
   } catch { return false; }
 }
-function installPayload(scope, requestedLink) {
-  const dest = skillDir(scope);
-  const previous = readReceipt(scope);
+function preflightSkillInstall(scope, skillSpec) {
+  const dest = skillDir(scope, skillSpec.name);
+  const previous = readReceipt(scope, skillSpec.name);
   const present = exists(dest);
   const isLink = present && fs.lstatSync(dest).isSymbolicLink();
   const legacy = present && !previous;
-  if (legacy && !legacyInstallation(dest)) throw new Error(`Unmanaged directory already exists; preserving it: ${dest}`);
+  if (legacy && (!skillSpec.allowLegacy || !legacyInstallation(dest))) {
+    throw new Error(`Unmanaged directory already exists; preserving it: ${dest}`);
+  }
   if (legacy) verifyManifest(dest);
   if (previous && ((previous.mode === 'link') !== isLink)) throw new Error(`Installation type changed outside the installer: ${dest}`);
   if (previous && isLink && fs.realpathSync(dest) !== previous.link_target) throw new Error(`Installation link changed outside the installer: ${dest}`);
-  let link = requestedLink;
-  if (link && (PKG_ROOT.split(path.sep).includes('node_modules')
-      || !exists(path.join(PKG_ROOT, '.git')) || path.resolve(PKG_ROOT) === path.resolve(dest))) {
-    console.log('  --link requires a separate Git checkout outside node_modules; copying instead');
-    link = false;
-  }
-  const newFiles = payloadFiles(PKG_ROOT);
+  const newFiles = payloadFiles(PKG_ROOT, skillSpec);
   if (present && !isLink) {
     for (const [relative, nextHash] of Object.entries(newFiles)) {
       const current = safeChild(dest, relative);
@@ -195,16 +235,27 @@ function installPayload(scope, requestedLink) {
       }
     }
   }
+  return { dest, previous, present, isLink, legacy, newFiles };
+}
+function installPayload(scope, requestedLink, skillSpec = SKILLS[0]) {
+  const { dest, previous, present, isLink, legacy, newFiles } = preflightSkillInstall(scope, skillSpec);
+  const sourceDir = skillSpec.sourceSubdir ? path.join(PKG_ROOT, skillSpec.sourceSubdir) : PKG_ROOT;
+  let link = requestedLink;
+  if (link && (PKG_ROOT.split(path.sep).includes('node_modules')
+      || !exists(path.join(PKG_ROOT, '.git')) || path.resolve(sourceDir) === path.resolve(dest))) {
+    console.log('  --link requires a separate Git checkout outside node_modules; copying instead');
+    link = false;
+  }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  const stage = fs.mkdtempSync(path.join(path.dirname(dest), `.${SKILL_NAME}-stage-`));
+  const stage = fs.mkdtempSync(path.join(path.dirname(dest), `.${skillSpec.name}-stage-`));
   const backup = `${dest}.backup-${crypto.randomUUID()}`;
   let movedOld = false;
   let movedStage = false;
-  const oldReceipt = exists(receiptPath(scope)) ? fs.readFileSync(receiptPath(scope)) : null;
+  const oldReceipt = exists(receiptPath(scope, skillSpec.name)) ? fs.readFileSync(receiptPath(scope, skillSpec.name)) : null;
   try {
     if (link) {
       fs.rmdirSync(stage);
-      try { fs.symlinkSync(PKG_ROOT, stage, process.platform === 'win32' ? 'junction' : 'dir'); }
+      try { fs.symlinkSync(sourceDir, stage, process.platform === 'win32' ? 'junction' : 'dir'); }
       catch (error) {
         console.log(`  link failed (${error.code || error.message}); copying instead`);
         link = false;
@@ -222,21 +273,27 @@ function installPayload(scope, requestedLink) {
               && sha(fs.readFileSync(old)) === hash) fs.unlinkSync(old);
         }
       }
-      fs.cpSync(PKG_ROOT, stage, {
+      fs.cpSync(sourceDir, stage, {
         recursive: true,
-        filter: (file) => !path.relative(PKG_ROOT, file) || isPayload(path.relative(PKG_ROOT, file)),
+        filter: (file) => {
+          const rel = path.relative(sourceDir, file);
+          if (!rel) return true;
+          if (!skillSpec.sourceSubdir) return isPayload(rel);
+          const parts = rel.split(path.sep);
+          return !parts.includes('__pycache__') && !parts.some((part) => /\.(py[co]|tgz)$/.test(part));
+        },
       });
     }
-    verifyManifest(stage);
-    for (const required of ['bin/cli.js', 'bin/python.js', 'runtime/validate_adjudication.py', 'cli/commands/adjudicate.md']) {
+    if (skillSpec.verifySelfManifest) verifyManifest(stage);
+    for (const required of skillSpec.requiredFiles) {
       if (!fs.statSync(safeChild(stage, required)).isFile()) throw new Error(`Package is missing ${required}`);
     }
     const retainBackup = legacy || (present && !isLink && link);
     if (present) { fs.renameSync(dest, backup); movedOld = true; }
     fs.renameSync(stage, dest); movedStage = true;
-    atomicWrite(receiptPath(scope), JSON.stringify({
+    atomicWrite(receiptPath(scope, skillSpec.name), JSON.stringify({
       schema_version: 1, scope, mode: link ? 'link' : 'copy', destination: dest,
-      link_target: link ? fs.realpathSync(PKG_ROOT) : null,
+      link_target: link ? fs.realpathSync(sourceDir) : null,
       files: newFiles,
       ...(retainBackup ? { retained_backup: backup } : {}),
     }, null, 2) + '\n');
@@ -249,8 +306,8 @@ function installPayload(scope, requestedLink) {
   } catch (error) {
     if (movedStage) removePath(dest);
     if (movedOld && exists(backup)) fs.renameSync(backup, dest);
-    if (oldReceipt) atomicWrite(receiptPath(scope), oldReceipt);
-    else if (exists(receiptPath(scope))) fs.unlinkSync(receiptPath(scope));
+    if (oldReceipt) atomicWrite(receiptPath(scope, skillSpec.name), oldReceipt);
+    else if (exists(receiptPath(scope, skillSpec.name))) fs.unlinkSync(receiptPath(scope, skillSpec.name));
     throw error;
   } finally { removePath(stage); }
 }
@@ -268,11 +325,21 @@ function parseScopes(args) {
 function cmdInstall(args) {
   const { scopes, link } = parseScopes(args);
   verifyManifest(PKG_ROOT);
-  scopes.forEach(assertCommandOwned);
-  console.log(`Installing ${SKILL_NAME} (${scopes.join(', ')}):`);
-  for (const scope of scopes) installPayload(scope, link);
-  for (const scope of new Set(scopes.map((s) => s === 'claude' ? 'claude' : 'user'))) syncCommand(scope);
-  console.log(`\nDone. Open a new agent session, then: /adjudicate <findings.json>\n${HOOK_NOTICE}`);
+  const cmdScopes = [...new Set(scopes.map((s) => s === 'claude' ? 'claude' : 'user'))];
+  for (const cmdScope of cmdScopes) {
+    for (const cmdSpec of COMMANDS) assertCommandOwned(cmdScope, cmdSpec);
+  }
+  for (const scope of scopes) {
+    for (const skillSpec of SKILLS) preflightSkillInstall(scope, skillSpec);
+  }
+  console.log(`Installing ${SKILLS.map((s) => s.name).join(' + ')} (${scopes.join(', ')}):`);
+  for (const scope of scopes) {
+    for (const skillSpec of SKILLS) installPayload(scope, link, skillSpec);
+  }
+  for (const cmdScope of cmdScopes) {
+    for (const cmdSpec of COMMANDS) syncCommand(cmdScope, cmdSpec);
+  }
+  console.log(`\nDone. Open a new agent session, then: /adjudicate <findings.json> or /cnvd-pack <adjudication-notes.md>\n${HOOK_NOTICE}`);
   return 0;
 }
 function pruneEmpty(dir) {
@@ -283,39 +350,47 @@ function pruneEmpty(dir) {
   }
   if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
 }
+function uninstallSkill(scope, skillSpec) {
+  const dest = skillDir(scope, skillSpec.name);
+  const receipt = readReceipt(scope, skillSpec.name);
+  if (!receipt) {
+    if (exists(dest)) throw new Error(`No ownership receipt; preserving ${dest}. Reinstall first to migrate this installation.`);
+    return;
+  }
+  if (exists(dest)) {
+    if (receipt.mode === 'link') {
+      if (!fs.lstatSync(dest).isSymbolicLink()
+          || (fs.existsSync(dest) && fs.realpathSync(dest) !== receipt.link_target)) {
+        throw new Error(`Installation link changed outside the installer; preserving ${dest}`);
+      }
+      fs.unlinkSync(dest);
+    } else {
+      if (fs.lstatSync(dest).isSymbolicLink()) throw new Error(`Installation type changed; preserving ${dest}`);
+      for (const [relative, hash] of Object.entries(receipt.files)) {
+        const file = safeChild(dest, relative);
+        if (exists(file) && fs.lstatSync(file).isFile() && !fs.lstatSync(file).isSymbolicLink()
+            && sha(fs.readFileSync(file)) === hash) fs.unlinkSync(file);
+      }
+      pruneEmpty(dest);
+      if (exists(dest)) console.log(`  preserved local or modified files in ${dest}`);
+    }
+  }
+  fs.unlinkSync(receiptPath(scope, skillSpec.name));
+  console.log(`  removed managed installation (${scope}/${skillSpec.name})`);
+}
 function cmdUninstall(args) {
   const { scopes, link } = parseScopes(args);
   if (link) throw new Error('--link applies only to install/update');
-  scopes.forEach(assertCommandOwned);
-  for (const scope of scopes) {
-    const dest = skillDir(scope);
-    const receipt = readReceipt(scope);
-    if (!receipt) {
-      if (exists(dest)) throw new Error(`No ownership receipt; preserving ${dest}. Reinstall first to migrate this installation.`);
-      continue;
-    }
-    if (exists(dest)) {
-      if (receipt.mode === 'link') {
-        if (!fs.lstatSync(dest).isSymbolicLink()
-            || (fs.existsSync(dest) && fs.realpathSync(dest) !== receipt.link_target)) {
-          throw new Error(`Installation link changed outside the installer; preserving ${dest}`);
-        }
-        fs.unlinkSync(dest);
-      } else {
-        if (fs.lstatSync(dest).isSymbolicLink()) throw new Error(`Installation type changed; preserving ${dest}`);
-        for (const [relative, hash] of Object.entries(receipt.files)) {
-          const file = safeChild(dest, relative);
-          if (exists(file) && fs.lstatSync(file).isFile() && !fs.lstatSync(file).isSymbolicLink()
-              && sha(fs.readFileSync(file)) === hash) fs.unlinkSync(file);
-        }
-        pruneEmpty(dest);
-        if (exists(dest)) console.log(`  preserved local or modified files in ${dest}`);
-      }
-    }
-    fs.unlinkSync(receiptPath(scope));
-    console.log(`  removed managed installation (${scope})`);
+  const cmdScopes = [...new Set(scopes.map((s) => s === 'claude' ? 'claude' : 'user'))];
+  for (const cmdScope of cmdScopes) {
+    for (const cmdSpec of COMMANDS) assertCommandOwned(cmdScope, cmdSpec);
   }
-  for (const scope of new Set(scopes.map((s) => s === 'claude' ? 'claude' : 'user'))) syncCommand(scope);
+  for (const scope of scopes) {
+    for (const skillSpec of SKILLS) uninstallSkill(scope, skillSpec);
+  }
+  for (const cmdScope of cmdScopes) {
+    for (const cmdSpec of COMMANDS) syncCommand(cmdScope, cmdSpec);
+  }
   return 0;
 }
 function runCheck(python, script, args, label, failures) {
@@ -336,7 +411,7 @@ function runCheck(python, script, args, label, failures) {
 function cmdDoctor(args) {
   if (args.some((arg) => arg !== '--full')) throw new Error('doctor accepts only --full');
   const full = args.includes('--full');
-  const scopes = SCOPES.filter((scope) => exists(path.join(skillDir(scope), 'SKILL.md')) || exists(receiptPath(scope)));
+  const scopes = SCOPES.filter((scope) => SKILLS.some((s) => exists(path.join(skillDir(scope, s.name), 'SKILL.md')) || exists(receiptPath(scope, s.name))));
   const failures = [];
   function fail(message) { failures.push(message); console.log(`  FAIL ${message}`); }
   console.log('mini-adjudication doctor:');
@@ -348,47 +423,56 @@ function cmdDoctor(args) {
   if (rg.error || rg.status !== 0) fail('ripgrep (rg) is required for reproducible search evidence');
   else console.log('  PASS ripgrep available');
   for (const scope of scopes) {
-    const dest = skillDir(scope);
-    try {
-      const receipt = readReceipt(scope);
-      if (!receipt) throw new Error(`Missing installation receipt (${scope}); reinstall to migrate`);
-      if (!exists(dest)) throw new Error(`Missing skill directory (${scope})`);
-      if (receipt.mode === 'link') {
-        if (!fs.lstatSync(dest).isSymbolicLink() || fs.realpathSync(dest) !== receipt.link_target) {
-          throw new Error(`Invalid installation link (${scope})`);
+    for (const skillSpec of SKILLS) {
+      const dest = skillDir(scope, skillSpec.name);
+      try {
+        const receipt = readReceipt(scope, skillSpec.name);
+        if (!receipt) throw new Error(`Missing installation receipt (${scope}/${skillSpec.name}); reinstall to migrate`);
+        if (!exists(dest)) throw new Error(`Missing skill directory (${scope}/${skillSpec.name})`);
+        if (receipt.mode === 'link') {
+          if (!fs.lstatSync(dest).isSymbolicLink() || fs.realpathSync(dest) !== receipt.link_target) {
+            throw new Error(`Invalid installation link (${scope}/${skillSpec.name})`);
+          }
+        } else {
+          if (fs.lstatSync(dest).isSymbolicLink()) throw new Error(`Unexpected installation link (${scope}/${skillSpec.name})`);
+          for (const [relative, hash] of Object.entries(receipt.files)) {
+            const file = safeChild(dest, relative);
+            if (!exists(file) || !fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink()
+                || sha(fs.readFileSync(file)) !== hash) throw new Error(`Installed file changed or missing (${scope}/${skillSpec.name}): ${relative}`);
+          }
         }
-      } else {
-        if (fs.lstatSync(dest).isSymbolicLink()) throw new Error(`Unexpected installation link (${scope})`);
-        for (const [relative, hash] of Object.entries(receipt.files)) {
-          const file = safeChild(dest, relative);
-          if (!exists(file) || !fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink()
-              || sha(fs.readFileSync(file)) !== hash) throw new Error(`Installed file changed or missing (${scope}): ${relative}`);
+        if (skillSpec.verifySelfManifest) verifyManifest(dest);
+        for (const required of skillSpec.requiredFiles) {
+          if (!exists(safeChild(dest, required))) throw new Error(`Missing required file (${scope}/${skillSpec.name}): ${required}`);
         }
-      }
-      verifyManifest(dest);
-      console.log(`  PASS installed files and manifest (${scope})`);
-      if (python) {
-        const fixture = path.join(dest, 'fixtures', 'mini-adjudication', 'expected');
-        runCheck(python, path.join(dest, 'runtime', full ? 'regression.py' : 'validate_adjudication.py'),
-          full ? [] : [path.join(fixture, 'adjudication-notes.md'), '--evidence-ledger', path.join(fixture, 'evidence.jsonl')],
-          `${full ? 'full regression' : 'fixture validation'} (${scope})`, failures);
-      }
-    } catch (error) { fail(error.message); }
+        console.log(`  PASS installed files (${scope}/${skillSpec.name})`);
+        if (skillSpec.name === SKILL_NAME && python) {
+          const fixture = path.join(dest, 'fixtures', 'mini-adjudication', 'expected');
+          runCheck(python, path.join(dest, 'runtime', full ? 'regression.py' : 'validate_adjudication.py'),
+            full ? [] : [path.join(fixture, 'adjudication-notes.md'), '--evidence-ledger', path.join(fixture, 'evidence.jsonl')],
+            `${full ? 'full regression' : 'fixture validation'} (${scope})`, failures);
+        }
+      } catch (error) { fail(error.message); }
+    }
   }
   for (const scope of new Set(scopes.map((s) => s === 'claude' ? 'claude' : 'user'))) {
-    try {
-      const file = commandPath(scope);
-      if (!exists(file)) throw new Error(`Missing trigger command: ${file}`);
-      assertCommandOwned(scope);
-      const receipt = readJson(commandReceiptPath(scope));
-      const target = receipt.target_scope;
-      if (!groupScopes(scope).includes(target) || !exists(receiptPath(target))
-          || !exists(path.join(skillDir(target), 'bin', 'cli.js'))
-          || fs.readFileSync(file, 'utf8') !== renderCommand(skillDir(target), skillDir(target))) {
-        throw new Error(`Invalid trigger command target or content: ${file}`);
-      }
-      console.log(`  PASS trigger command (${target}): ${file}`);
-    } catch (error) { fail(error.message); }
+    for (const cmdSpec of COMMANDS) {
+      try {
+        const file = commandPath(scope, cmdSpec.fileName);
+        if (!exists(file)) throw new Error(`Missing trigger command: ${file}`);
+        assertCommandOwned(scope, cmdSpec);
+        const receipt = readJson(commandReceiptPath(scope, cmdSpec.fileName));
+        const target = receipt.target_scope;
+        const cliTarget = receipt.cli_scope || target;
+        if (!groupScopes(scope).includes(target) || !groupScopes(scope).includes(cliTarget)
+            || !exists(receiptPath(target, cmdSpec.targetSkill)) || !exists(receiptPath(cliTarget, cmdSpec.cliSkill))
+            || !exists(path.join(skillDir(cliTarget, cmdSpec.cliSkill), 'bin', 'cli.js'))
+            || fs.readFileSync(file, 'utf8') !== renderCommand(skillDir(target, cmdSpec.targetSkill), skillDir(cliTarget, cmdSpec.cliSkill), cmdSpec.fileName, skillDir(cliTarget, cmdSpec.cliSkill))) {
+          throw new Error(`Invalid trigger command target or content: ${file}`);
+        }
+        console.log(`  PASS trigger command (${target}): ${file}`);
+      } catch (error) { fail(error.message); }
+    }
   }
   console.log(`  INFO ${HOOK_NOTICE}`);
   console.log(failures.length ? `\nFAIL: ${failures.length} check(s) failed` : '\nOK: all requested checks passed');

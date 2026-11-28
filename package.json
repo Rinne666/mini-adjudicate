@@ -1,13 +1,14 @@
 {
   "name": "mini-adjudication",
   "version": "5.2.0",
-  "description": "Post-audit vulnerability acceptance standard: judge whether audited findings hold and where they would be accepted (maintainer advisory, CVE/CNA, CNVD, SRC, bounty platforms), then produce the submission summary. Installs as an agent skill with a /adjudicate trigger command.",
+  "description": "Post-audit vulnerability acceptance standard and CNVD packaging pipeline: judge whether audited findings hold (/adjudicate) and package accepted findings into CNVD Word reports, narrated videos, and submission bundles (/cnvd-pack).",
   "bin": {
     "mini-adjudication": "bin/cli.js"
   },
   "files": [
     "bin",
     "cli",
+    "skills",
     "SKILL.md",
     "README.md",
     "references",

@@ -42,11 +42,12 @@ node bin/cli.js doctor --full
 ```
 
 `doctor` checks installation integrity, interpreter availability, and the
-trigger command. `--full` additionally runs the regression suite. The CLI
-installs the skill and `/adjudicate` command; **it does not register host
-SessionStart or Stop hooks**. The optional adapters are described in
-[SKILL.md](SKILL.md#optional-harness-integration). Without host integration,
-run the validation commands explicitly.
+trigger commands (`/adjudicate` and `/cnvd-pack`). `--full` additionally runs
+the regression suite. The CLI installs both skills (`mini-adjudication` and
+`cnvd-packager`) and their trigger commands (`/adjudicate` and `/cnvd-pack`);
+**it does not register host SessionStart or Stop hooks**. The optional adapters
+are described in [SKILL.md](SKILL.md#optional-harness-integration). Without
+host integration, run the validation commands explicitly.
 
 ## Start an adjudication
 
@@ -161,8 +162,21 @@ will accept the result. A passing gate is not a vulnerability certificate.
 | `runtime/validate_adjudication.py` | Phase gates and evidence consistency |
 | `runtime/evidence_log.py` | Read/search captures and hash-bearing ledger |
 | `runtime/cvss31.py` | Independent CVSS v3.1 score cross-check |
-| `bin/cli.js`, `cli/` | Installer, launcher, and trigger command |
+| `bin/cli.js`, `cli/` | Installer, launcher, and trigger commands (`/adjudicate`, `/cnvd-pack`) |
+| `skills/cnvd-packager/` | Companion post-adjudication CNVD packaging skill (`cnvd-packager`) |
 | `fixtures/`, `runtime/test_*.py` | Regression inputs and counterexamples |
+
+## CNVD Packaging Pipeline (`/cnvd-pack` / `cnvd-packager`)
+
+Separate from `/adjudicate` (which adjudicates source-grounded validity and
+reportability without touching live deployments), the bundled
+[cnvd-packager](skills/cnvd-packager/SKILL.md) skill and `/cnvd-pack` command
+handle post-adjudication CNVD delivery:
+
+1. **Filter & Align:** ingest `mini-adjudication` (`accept` / `accept_after_rewrite`) or `security-audit` (`confirmed`) outputs and align target URLs + low-privilege test accounts.
+2. **Capture Evidence:** execute live verification and save key screenshots (`screenshots/`) covering the exploit execution and verified impact.
+3. **Render Word + Video:** render a unified 5-section CNVD `.docx` report (overview, source location, illustrated reproduction, impact, remediation) and produce `复现视频.mp4` meeting the declarative Chinese-voiceover video acceptance gate.
+4. **Bundle:** assemble `{产品名}_{漏洞类型}_{简短标识}/` containing the `.docx`, `复现视频.mp4`, optional `poc/`, and `screenshots/`.
 
 Run `npm test` for regression checks. After intentional changes to tracked
 skill files, refresh the manifest using

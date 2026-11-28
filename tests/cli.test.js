@@ -165,3 +165,29 @@ test('generated quoted launcher works from an installed path containing spaces',
   ok(callCli(home, ['run', 'cvss31.py', '--selftest'], skill(home)));
   assert.equal(callCli(home, ['run', '../SKILL.md']).status, 1);
 });
+
+test('cnvd-packager skill and /cnvd-pack command install, link, verify, and uninstall distinctly from /adjudicate', (t) => {
+  const { home } = sandbox(t);
+  const cnvdSkill = (scope = 'user') => path.join(home, { user: '.agents', zcode: '.zcode', claude: '.claude' }[scope], 'skills', 'cnvd-packager');
+  const cnvdCmd = (scope = 'user') => path.join(home, scope === 'claude' ? '.claude' : '.zcode', 'commands', 'cnvd-pack.md');
+  ok(callCli(home, ['install', '--all']));
+  assert.ok(fs.existsSync(path.join(cnvdSkill('user'), 'SKILL.md')));
+  assert.ok(fs.existsSync(path.join(cnvdSkill('zcode'), 'SKILL.md')));
+  assert.ok(fs.existsSync(path.join(cnvdSkill('claude'), 'SKILL.md')));
+  const cmdText = fs.readFileSync(cnvdCmd('user'), 'utf8');
+  assert.match(cmdText, /# \/cnvd-pack/);
+  assert.ok(cmdText.includes(cnvdSkill('user').split(path.sep).join('/')));
+  assert.ok(cmdText.includes(skill(home, 'user').split(path.sep).join('/')));
+  const line = cmdText.split('\n').find((value) => value.includes(' run check_skill_loaded.py'));
+  const res = process.platform === 'win32'
+    ? spawnSync('powershell.exe', ['-NoProfile', '-Command', line], { encoding: 'utf8' })
+    : spawnSync('/bin/sh', ['-c', line], { encoding: 'utf8' });
+  assert.equal(res.status, 0, `${res.stdout}\n${res.stderr}`);
+  ok(callCli(home, ['uninstall', '--user']));
+  assert.equal(fs.existsSync(cnvdSkill('user')), false);
+  assert.ok(fs.readFileSync(cnvdCmd('user'), 'utf8').includes(cnvdSkill('zcode').split(path.sep).join('/')));
+  ok(callCli(home, ['doctor']));
+  ok(callCli(home, ['uninstall', '--all']));
+  assert.equal(fs.existsSync(cnvdCmd('user')), false);
+  assert.equal(fs.existsSync(cnvdCmd('claude')), false);
+});

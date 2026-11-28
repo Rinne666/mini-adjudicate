@@ -42,7 +42,7 @@ from pathlib import Path
 MANIFEST_PATH = Path(__file__).resolve().parent / "skill_manifest.json"
 REPO_ROOT = MANIFEST_PATH.resolve().parent.parent
 PAYLOAD_FILES = ("SKILL.md", "README.md", "_meta.json", "package.json")
-PAYLOAD_DIRS = ("bin", "cli", "references", "templates", "schemas", "runtime", "fixtures")
+PAYLOAD_DIRS = ("bin", "cli", "skills", "references", "templates", "schemas", "runtime", "fixtures")
 
 
 def _payload_files() -> set[str]:
